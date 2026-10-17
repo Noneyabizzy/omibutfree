@@ -747,14 +747,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
 
   /// Make saved transcripts show a person's current name (covers renames).
   void _syncSegmentNames() {
-    if (_people.isEmpty) return;
-    final names = {for (final p in _people) p.id: p.name};
-    for (final c in _conversations) {
-      for (final s in c.segments) {
-        final name = s.personId == null ? null : names[s.personId];
-        if (name != null) s.speakerName = name;
-      }
-    }
+    applyPersonNames(_conversations, {for (final p in _people) p.id: p.name});
   }
 
   /// Bumped by "Delete all voice data"; a conversation save that captured its

@@ -180,13 +180,9 @@ class DatabaseService {
   ) async {
     final rows = await db.query('people', columns: ['id', 'name']);
     if (rows.isEmpty) return;
-    final names = {for (final r in rows) r['id'] as String: r['name'] as String};
-    for (final c in conversations) {
-      for (final s in c.segments) {
-        final name = s.personId == null ? null : names[s.personId];
-        if (name != null) s.speakerName = name;
-      }
-    }
+    applyPersonNames(conversations, {
+      for (final r in rows) r['id'] as String: r['name'] as String,
+    });
   }
 
   static Future<Conversation?> getConversation(String id) async {

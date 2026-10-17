@@ -71,7 +71,11 @@ bool _sameVoice(TranscriptSegment a, TranscriptSegment b) =>
 ///
 /// Deepgram sends a new result after every pause, so one person talking with
 /// pauses would otherwise show up as a string of small blocks. A different
-/// speaker in between, or a long gap, still starts a new block. A segment may
+/// speaker in between, or a long gap, still starts a new block. When two
+/// Deepgram speaker numbers are merged because both were recognised as the same
+/// person, the block keeps the earlier segment's speaker number only. (Labelling
+/// that block later uses that number's voice samples; the other number's
+/// samples are not linked to it.) A segment may
 /// start up to one second before the previous one ended (Deepgram's word
 /// timings can overlap slightly) and still merge; a larger jump backwards
 /// never merges. A new Deepgram stream restarts its clock, so the app ends the
@@ -105,9 +109,26 @@ void appendSegmentsMerged(
   }
 }
 
-/// Re-applies [appendSegmentsMerged] to [segments] in place. Used after speaker
-/// recognition names segments that arrived unnamed, which can make neighbouring
-/// blocks belong to the same person.
+/// Sets each segment's `speakerName` from [namesByPersonId] (person id to
+/// current name), so a rename shows in every saved transcript. Segments whose
+/// person is not in the map keep the name they have.
+void applyPersonNames(
+  Iterable<Conversation> conversations,
+  Map<String, String> namesByPersonId,
+) {
+  if (namesByPersonId.isEmpty) return;
+  for (final c in conversations) {
+    for (final s in c.segments) {
+      final name = s.personId == null ? null : namesByPersonId[s.personId];
+      if (name != null) s.speakerName = name;
+    }
+  }
+}
+
+/// Re-applies [appendSegmentsMerged] to [segments] in place, so [segments] must
+/// be a growable list (not `const []`). Used after speaker recognition names
+/// segments that arrived unnamed, which can make neighbouring blocks belong to
+/// the same person.
 void mergeAdjacentSegments(
   List<TranscriptSegment> segments, {
   double maxGapSeconds = 10,

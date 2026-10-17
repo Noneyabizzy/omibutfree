@@ -4,6 +4,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:omi_local/models/conversation.dart';
 
 void main() {
+  group('applyPersonNames', () {
+    test('renames segments by person id and leaves others alone', () {
+      TranscriptSegment seg(int id, {String? personId, String? name}) =>
+          TranscriptSegment(
+            text: 'x',
+            speakerId: id,
+            startTime: 0,
+            endTime: 1,
+            personId: personId,
+            speakerName: name,
+          );
+      final c = Conversation(
+        id: 'c',
+        createdAt: DateTime(2026),
+        segments: [
+          seg(0, personId: 'a', name: 'Old'),
+          seg(1, personId: 'gone', name: 'Kept'),
+          seg(2),
+        ],
+      );
+      applyPersonNames([c], {'a': 'Alice'});
+      expect(c.segments[0].speakerName, 'Alice');
+      expect(c.segments[1].speakerName, 'Kept');
+      expect(c.segments[2].speakerName, isNull);
+    });
+  });
+
   group('TranscriptSegment', () {
     test('JSON round trip keeps speaker_name and person_id', () {
       final seg = TranscriptSegment(
