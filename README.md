@@ -38,6 +38,7 @@ It connects directly to your Omi hardware (Friend/DevKit) via Bluetooth Low Ener
 - **Memories**: Automatically extracts important facts. Edit or add memories manually by selecting text.
 - **Actionable Tasks**: Detects promises and to-dos with scheduled local notifications.
 - **Hold-to-Ask**: Hold the Omi button to chat with your AI assistant in real-time.
+- **Speaker Recognition** (opt-in, Cloud/Deepgram mode): Tap a speaker in a saved conversation to name them; the app learns their voice on-device and recognises them in future conversations. Manage people under Settings > People & Voices.
 
 ### ⚡️ Modern Hardware Integration
 
@@ -115,6 +116,12 @@ This project is open source and free forever. We welcome contributions!
 3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
+
+## 🙏 Credits & Third-Party Models
+
+- **Sherpa-ONNX** (Apache-2.0) runs the speaker-embedding model on-device.
+- **Voice model**: a WeSpeaker ResNet34 speaker-embedding model trained on VoxCeleb, in ONNX format, downloaded on first use (~26 MB) from the sherpa-onnx author's Hugging Face repo (`csukuangfj/speaker-embedding-models`). WeSpeaker's documentation says its pretrained models follow the license of their training dataset, and VoxCeleb is published under CC BY 4.0 for research purposes. Fine for personal use; if you plan commercial use, check those terms yourself.
+- **Privacy**: saved voice samples (voiceprints) stay in the local database and are never uploaded. Voiceprints count as biometric data in some places, so only save voices of people who are OK with it. Deleting a person under People & Voices deletes their samples.
 
 ---
 

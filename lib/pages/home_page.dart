@@ -626,7 +626,7 @@ class _DeviceTabState extends State<DeviceTab> {
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
-                                  'S${segment.speakerId}',
+                                  segment.speakerName ?? 'S${segment.speakerId}',
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12,

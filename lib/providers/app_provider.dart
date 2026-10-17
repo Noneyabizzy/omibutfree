@@ -1,5 +1,6 @@
 /// App state provider for device, conversations, and recording
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -17,6 +18,8 @@ import '../services/opus_decoder_service.dart';
 import '../services/notification_service.dart';
 import '../services/mic_service.dart';
 import '../services/sdcard_sync_service.dart';
+import '../services/speaker_id_service.dart';
+import '../services/speaker_matching.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
@@ -33,6 +36,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   WhisperService? _whisperService;
   OpenAIService? _openaiService;
   OpusDecoderService? _opusDecoder;
+  SpeakerIdService? _speakerId; // On-device speaker recognition (Deepgram mode)
 
   // Device state
   DeviceConnectionState _deviceState = DeviceConnectionState.disconnected;
@@ -164,6 +168,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
       await loadConversations();
       await loadMemories();
       await loadTasks();
+      await loadPeople();
     } catch (e) {
       debugPrint('AppProvider init error: $e');
     }
@@ -428,6 +433,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
           sampleRate: 16000,
         );
         await _deepgramService!.connect();
+        _startSpeakerId();
     }
   }
 
@@ -440,6 +446,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     _hasActiveConversation = false;
     _lastTranscriptTime = null;
     _cancelSilenceTimer();
+    _speakerId?.session.startNewConversation();
     debugPrint('Started new conversation: ${_currentConversation!.id}');
   }
 
@@ -458,8 +465,12 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
       }
     }
 
+    // Give already-recognised speakers their name straight away
+    _applyKnownSpeakers(segments);
+
     // Add segments to current conversation
     _liveSegments.addAll(segments);
+    _scheduleSpeakerIdentification(segments);
     _lastTranscriptTime = DateTime.now();
     _hasActiveConversation = true;
 
@@ -495,6 +506,9 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     // Copy data before resetting
     final conversationToSave = _currentConversation!;
     conversationToSave.segments = List.from(_liveSegments);
+    // Voice samples gathered for this conversation's speakers (kept so the
+    // user can label them later). Taken before the session is reset below.
+    final speakerEmbeddings = _speakerId?.session.snapshotEmbeddings();
 
     // Start new conversation immediately so listening continues
     _startNewConversation();
@@ -595,6 +609,12 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
 
     // Save to database
     await DatabaseService.saveConversation(conversationToSave);
+    if (speakerEmbeddings != null && speakerEmbeddings.isNotEmpty) {
+      await DatabaseService.saveConversationSpeakers(
+        conversationToSave.id,
+        speakerEmbeddings,
+      );
+    }
     await loadConversations();
 
     debugPrint('Saved conversation: ${conversationToSave.title}');
@@ -631,6 +651,8 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     // Clean up transcription services
     await _deepgramService?.disconnect();
     _deepgramService = null;
+    _speakerId?.dispose();
+    _speakerId = null;
     _sherpaService?.stopProcessing();
     _sherpaService?.dispose();
     _sherpaService = null;
@@ -650,10 +672,277 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     debugPrint('Stopped continuous listening');
   }
 
+  // === Speaker Recognition ===
+  //
+  // Deepgram labels speakers "0, 1, 2 ...". While listening we cut each
+  // segment's audio out of a rolling buffer, turn it into a voice embedding
+  // with Sherpa-ONNX and compare it with the people the user has labelled
+  // before. Labelling a speaker in a saved conversation teaches the app that
+  // person's voice (see assignSpeaker).
+
+  List<Person> _people = [];
+  List<Person> get people => _people;
+
+  /// True while a speaker-recognition session is attached to the live stream.
+  bool get isSpeakerRecognitionActive => _speakerId != null;
+
+  Future<void> _idChain = Future.value();
+
+  Future<void> loadPeople() async {
+    _people = await DatabaseService.getPeople();
+    _syncSegmentNames();
+    await _refreshSpeakerProfiles();
+    notifyListeners();
+  }
+
+  Future<void> _refreshSpeakerProfiles() async {
+    final embeddings = await DatabaseService.getAllPersonEmbeddings();
+    final profiles = [
+      for (final p in _people)
+        SpeakerProfile(
+          id: p.id,
+          name: p.name,
+          embeddings: embeddings[p.id] ?? <Float32List>[],
+        ),
+    ];
+    _speakerId?.setProfiles(profiles);
+  }
+
+  /// Make saved transcripts show a person's current name (covers renames).
+  void _syncSegmentNames() {
+    if (_people.isEmpty) return;
+    final names = {for (final p in _people) p.id: p.name};
+    for (final c in _conversations) {
+      for (final s in c.segments) {
+        final name = s.personId == null ? null : names[s.personId];
+        if (name != null) s.speakerName = name;
+      }
+    }
+  }
+
+  /// Applies a changed match threshold to the running session.
+  void updateSpeakerMatchThreshold(double value) {
+    SettingsService.speakerMatchThreshold = value;
+    _speakerId?.updateThreshold(value);
+  }
+
+  /// Start speaker recognition for a new Deepgram stream.
+  void _startSpeakerId() {
+    _speakerId?.dispose();
+    _speakerId = null;
+    if (!SettingsService.speakerIdEnabled) return;
+
+    final service = SpeakerIdService();
+    _speakerId = service;
+    service.resetStream();
+    unawaited(_refreshSpeakerProfiles());
+
+    // Download/load the model in the background so transcription starts at once.
+    service.initialize().then((_) {
+      debugPrint('Speaker recognition ready');
+      notifyListeners();
+    }).catchError((Object e) {
+      debugPrint('Speaker recognition unavailable: $e');
+    });
+  }
+
+  /// Send audio to Deepgram and mirror it into the speaker buffer so both share
+  /// one timeline. [wireAudio] is what Deepgram expects (Opus or PCM16);
+  /// [pcm] is the same audio as PCM16 (null if Opus decoding failed).
+  void _sendToDeepgram(Uint8List wireAudio, Uint8List? pcm) {
+    final dg = _deepgramService;
+    if (dg == null || !dg.isConnected) return; // sendAudio would drop it too
+    dg.sendAudio(wireAudio);
+    _speakerId?.feedPcm(pcm);
+  }
+
+  void _applyKnownSpeakers(List<TranscriptSegment> segments) {
+    final svc = _speakerId;
+    if (svc == null) return;
+    for (final s in segments) {
+      final person = svc.session.resolvedFor(s.speakerId);
+      if (person != null) {
+        s.speakerName = person.name;
+        s.personId = person.id;
+      }
+    }
+  }
+
+  void _scheduleSpeakerIdentification(List<TranscriptSegment> segments) {
+    final svc = _speakerId;
+    if (svc == null) return;
+    // One at a time, in order, so embeddings are not computed concurrently.
+    _idChain = _idChain
+        .then((_) => _identifySegments(svc, segments))
+        .catchError((Object e) {
+      debugPrint('Speaker identification error: $e');
+    });
+  }
+
+  Future<void> _identifySegments(
+    SpeakerIdService svc,
+    List<TranscriptSegment> segments,
+  ) async {
+    if (!svc.isReady || !identical(svc, _speakerId)) return;
+
+    final touched = <int>{};
+    for (final seg in segments) {
+      final duration = seg.endTime - seg.startTime;
+      if (duration < SpeakerIdService.minSegmentSeconds) continue;
+
+      final end = math.min(
+        seg.endTime,
+        seg.startTime + SpeakerIdService.maxSegmentSeconds,
+      );
+      final clip = svc.buffer.slice(seg.startTime, end);
+      if (clip == null) {
+        debugPrint(
+          'Speaker clip ${seg.startTime.toStringAsFixed(1)}-${end.toStringAsFixed(1)}s '
+          'unavailable (buffer holds ${svc.buffer.durationSeconds.toStringAsFixed(1)}s)',
+        );
+        continue;
+      }
+
+      // Let the UI render between embeddings (the model call is synchronous).
+      await Future<void>.delayed(Duration.zero);
+      if (!identical(svc, _speakerId)) return;
+
+      final embedding = svc.embed(clip);
+      if (embedding == null) continue;
+      svc.session.addEmbedding(seg.speakerId, embedding);
+      touched.add(seg.speakerId);
+    }
+
+    var changed = false;
+    for (final id in touched) {
+      final result = svc.session.resolve(id);
+      if (result != null) {
+        // Handy when tuning the threshold: watch these lines in the console.
+        debugPrint(
+          'Speaker $id -> ${result.profile?.name ?? "unknown"} '
+          '(score ${result.score.toStringAsFixed(2)}, '
+          'runner-up ${result.runnerUp.toStringAsFixed(2)})',
+        );
+      }
+      changed = _applyResolution(id) || changed;
+    }
+    if (changed) notifyListeners();
+  }
+
+  /// Point every live segment of [speakerId] at the currently resolved person.
+  bool _applyResolution(int speakerId) {
+    final svc = _speakerId;
+    if (svc == null) return false;
+    final person = svc.session.resolvedFor(speakerId);
+    var changed = false;
+    for (final seg in _liveSegments) {
+      if (seg.speakerId != speakerId || seg.personId == person?.id) continue;
+      seg.speakerName = person?.name;
+      seg.personId = person?.id;
+      changed = true;
+    }
+    return changed;
+  }
+
+  /// Label one speaker of a saved conversation as [personId] (existing) or as
+  /// a new person called [newPersonName]. The voice samples captured for that
+  /// speaker are enrolled for the person, so they are recognised next time.
+  ///
+  /// Returns how many voice samples were learned (0 if none were captured, e.g.
+  /// speaker recognition was off or the speaker only said short phrases).
+  Future<int> assignSpeaker({
+    required Conversation conversation,
+    required int speakerId,
+    String? personId,
+    String? newPersonName,
+  }) async {
+    String id;
+    String name;
+    if (personId != null) {
+      final person = _people.firstWhere((p) => p.id == personId);
+      id = person.id;
+      name = person.name;
+    } else {
+      name = (newPersonName ?? '').trim();
+      if (name.isEmpty) return 0;
+      // Reuse an existing person with the same name rather than duplicating.
+      final existing = _people.where(
+        (p) => p.name.toLowerCase() == name.toLowerCase(),
+      );
+      if (existing.isNotEmpty) {
+        id = existing.first.id;
+        name = existing.first.name;
+      } else {
+        id = const Uuid().v4();
+        await DatabaseService.savePerson(id, name);
+      }
+    }
+
+    // Undo what this speaker previously taught (possibly the wrong person),
+    // then enroll their voice samples under the chosen person.
+    await DatabaseService.removeEnrollmentsFor(conversation.id, speakerId);
+    final samples = await DatabaseService.getConversationSpeakerEmbeddings(
+      conversation.id,
+      speakerId,
+    );
+    if (samples.isNotEmpty) {
+      await DatabaseService.addPersonEmbeddings(
+        id,
+        samples,
+        conversationId: conversation.id,
+        speakerId: speakerId,
+      );
+    }
+
+    for (final seg in conversation.segments) {
+      if (seg.speakerId == speakerId) {
+        seg.speakerName = name;
+        seg.personId = id;
+      }
+    }
+    await DatabaseService.saveConversation(conversation);
+    await loadConversations();
+    await loadPeople();
+    return samples.length;
+  }
+
+  /// Remove the name from one speaker of a saved conversation and forget what
+  /// their voice samples taught the app.
+  Future<void> clearSpeakerLabel({
+    required Conversation conversation,
+    required int speakerId,
+  }) async {
+    await DatabaseService.removeEnrollmentsFor(conversation.id, speakerId);
+    for (final seg in conversation.segments) {
+      if (seg.speakerId == speakerId) {
+        seg.speakerName = null;
+        seg.personId = null;
+      }
+    }
+    await DatabaseService.saveConversation(conversation);
+    await loadConversations();
+    await loadPeople();
+  }
+
+  Future<void> renamePerson(String personId, String newName) async {
+    final name = newName.trim();
+    if (name.isEmpty) return;
+    await DatabaseService.renamePerson(personId, name);
+    await loadPeople();
+  }
+
+  /// Deletes a person and their voice samples. Transcripts keep the name text.
+  Future<void> deletePerson(String personId) async {
+    await DatabaseService.deletePerson(personId);
+    _speakerId?.session.forgetPerson(personId);
+    await loadPeople();
+  }
+
   // === Conversations Methods ===
 
   Future<void> loadConversations() async {
     _conversations = await DatabaseService.getConversations();
+    _syncSegmentNames();
     notifyListeners();
   }
 
@@ -1300,9 +1589,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
           break;
         default: // cloud
           // Deepgram expects Opus when encoding='opus'
-          if (_deepgramService != null) {
-            _deepgramService?.sendAudio(trimmedAudio);
-          }
+          _sendToDeepgram(trimmedAudio, pcmData);
       }
     }
   }
@@ -1326,9 +1613,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
         break;
       default: // cloud
         // Deepgram expects linear16 when encoding='linear16'
-        if (_deepgramService != null) {
-          _deepgramService?.sendAudio(alignedData);
-        }
+        _sendToDeepgram(alignedData, alignedData);
     }
   }
 
@@ -1389,6 +1674,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     _silenceTimer?.cancel();
     _bleService.dispose();
     _deepgramService?.disconnect();
+    _speakerId?.dispose();
     _audioPlayer.dispose();
     super.dispose();
   }

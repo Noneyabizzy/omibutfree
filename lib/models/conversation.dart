@@ -5,10 +5,21 @@ import 'dart:convert';
 /// A single segment of transcribed speech
 class TranscriptSegment {
   final String text;
+
+  /// Diarization index. For Deepgram this is only stable within one
+  /// listening session, so it identifies "a speaker in this conversation",
+  /// not a person across conversations.
   final int speakerId;
   final double startTime;
   final double endTime;
   final bool isUser;
+
+  /// Name of the identified/assigned person, or null if this speaker has not
+  /// been recognised or labelled yet.
+  String? speakerName;
+
+  /// Id of the matching row in the `people` table (null if unlabelled).
+  String? personId;
 
   TranscriptSegment({
     required this.text,
@@ -16,7 +27,12 @@ class TranscriptSegment {
     required this.startTime,
     required this.endTime,
     this.isUser = false,
+    this.speakerName,
+    this.personId,
   });
+
+  /// What to show in the UI and feed to the summariser.
+  String get displayName => speakerName ?? 'Speaker $speakerId';
 
   Map<String, dynamic> toJson() => {
     'text': text,
@@ -24,6 +40,8 @@ class TranscriptSegment {
     'start': startTime,
     'end': endTime,
     'is_user': isUser,
+    if (speakerName != null) 'speaker_name': speakerName,
+    if (personId != null) 'person_id': personId,
   };
 
   factory TranscriptSegment.fromJson(Map<String, dynamic> json) {
@@ -33,6 +51,34 @@ class TranscriptSegment {
       startTime: (json['start'] ?? 0).toDouble(),
       endTime: (json['end'] ?? 0).toDouble(),
       isUser: json['is_user'] ?? false,
+      speakerName: json['speaker_name'] as String?,
+      personId: json['person_id'] as String?,
+    );
+  }
+}
+
+/// A person whose voice has been enrolled for automatic recognition.
+class Person {
+  final String id;
+  String name;
+  final DateTime createdAt;
+
+  /// How many voice samples are stored for this person (more = better).
+  final int sampleCount;
+
+  Person({
+    required this.id,
+    required this.name,
+    required this.createdAt,
+    this.sampleCount = 0,
+  });
+
+  factory Person.fromDbRow(Map<String, dynamic> row) {
+    return Person(
+      id: row['id'] as String,
+      name: row['name'] as String,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+      sampleCount: (row['sample_count'] as int?) ?? 0,
     );
   }
 }
@@ -54,7 +100,7 @@ class Conversation {
   });
 
   String get transcript {
-    return segments.map((s) => 'Speaker ${s.speakerId}: ${s.text}').join('\n');
+    return segments.map((s) => '${s.displayName}: ${s.text}').join('\n');
   }
 
   /// Get the duration of the conversation from first to last segment
