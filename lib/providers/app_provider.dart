@@ -18,6 +18,7 @@ import '../services/opus_decoder_service.dart';
 import '../services/notification_service.dart';
 import '../services/mic_service.dart';
 import '../services/sdcard_sync_service.dart';
+import '../services/serial_queue.dart';
 import '../services/speaker_id_service.dart';
 import '../services/speaker_matching.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -754,15 +755,12 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   /// voice samples before that must not write them afterwards.
   int _voiceDataEpoch = 0;
 
-  /// Voice-sample writes run one after another, so a save and a delete-all
-  /// cannot interleave.
-  Future<void> _voiceWrites = Future.value();
+  /// Voice-sample changes (saving a conversation's samples, labelling a
+  /// speaker, delete-all) run one after another, so they cannot interleave.
+  final SerialQueue _voiceWrites = SerialQueue();
 
-  Future<void> _queueVoiceWrite(Future<void> Function() op) {
-    final run = _voiceWrites.then((_) => op());
-    _voiceWrites = run.catchError((Object _) {});
-    return run;
-  }
+  Future<T> _queueVoiceWrite<T>(Future<T> Function() op) =>
+      _voiceWrites.run(op);
 
   /// Applies a changed match threshold to the running session.
   void updateSpeakerMatchThreshold(double value) {
@@ -978,20 +976,25 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     }
 
     // Undo what this speaker previously taught (possibly the wrong person),
-    // then enroll their voice samples under the chosen person.
-    await DatabaseService.removeEnrollmentsFor(conversation.id, speakerId);
-    final samples = await DatabaseService.getConversationSpeakerEmbeddings(
-      conversation.id,
-      speakerId,
-    );
-    if (samples.isNotEmpty) {
-      await DatabaseService.addPersonEmbeddings(
-        id,
-        samples,
-        conversationId: conversation.id,
-        speakerId: speakerId,
+    // then enroll their voice samples under the chosen person. One queued
+    // step, so a "Delete all voice data" cannot run between reading the
+    // samples and writing them.
+    final samples = await _queueVoiceWrite(() async {
+      await DatabaseService.removeEnrollmentsFor(conversation.id, speakerId);
+      final found = await DatabaseService.getConversationSpeakerEmbeddings(
+        conversation.id,
+        speakerId,
       );
-    }
+      if (found.isNotEmpty) {
+        await DatabaseService.addPersonEmbeddings(
+          id,
+          found,
+          conversationId: conversation.id,
+          speakerId: speakerId,
+        );
+      }
+      return found;
+    });
 
     for (final seg in conversation.segments) {
       if (seg.speakerId == speakerId) {
