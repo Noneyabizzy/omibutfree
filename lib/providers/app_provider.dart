@@ -816,8 +816,9 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     });
   }
 
-  /// Bumped whenever Deepgram's stream clock restarts, so identification work
-  /// queued against the old timeline can tell it is stale.
+  /// Bumped whenever Deepgram's stream clock restarts, when recognition is
+  /// turned off, and when all voice data is deleted, so identification work
+  /// queued before that can tell it is stale.
   int _speakerStreamGen = 0;
 
   /// Deepgram dropped the connection and it was re-opened. Its clock and
@@ -996,7 +997,10 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     String id;
     String name;
     if (personId != null) {
-      final person = _people.firstWhere((p) => p.id == personId);
+      // The person may have been deleted since the sheet was opened.
+      final matches = _people.where((p) => p.id == personId);
+      if (matches.isEmpty) return 0;
+      final person = matches.first;
       id = person.id;
       name = person.name;
     } else {
@@ -1097,6 +1101,9 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   /// people keep their names) and those kept for labelling saved conversations.
   Future<void> deleteAllVoiceData() async {
     _voiceDataEpoch++;
+    // Identification work already queued was started on audio from before the
+    // delete; it must not add voice samples to the session afterwards.
+    _speakerStreamGen++;
     await _queueVoiceWrite(DatabaseService.deleteAllVoiceData);
     for (final p in _people) {
       _speakerId?.session.forgetPerson(p.id);
