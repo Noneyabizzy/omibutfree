@@ -12,10 +12,26 @@ class FakeDeepgram {
   /// Messages per connection: binary frames as `List<int>`, text as `String`.
   final received = <List<dynamic>>[];
 
+  /// While set, upgrade requests are rejected with 401 (like a bad API key).
+  bool refuse = false;
+
+  /// How long to wait before rejecting (a handshake that hangs, then fails).
+  Duration refuseDelay = Duration.zero;
+
+  /// How many upgrade requests were rejected.
+  int refused = 0;
+
   static Future<FakeDeepgram> start() async {
     final f = FakeDeepgram();
     f._server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     f._server.listen((req) async {
+      if (f.refuse) {
+        await Future<void>.delayed(f.refuseDelay);
+        f.refused++;
+        req.response.statusCode = HttpStatus.unauthorized;
+        await req.response.close();
+        return;
+      }
       final ws = await WebSocketTransformer.upgrade(
         req,
         protocolSelector: (p) => p.first,
@@ -60,7 +76,13 @@ void main() {
   setUp(() async => server = await FakeDeepgram.start());
   tearDown(() async => server.stop());
 
-  DeepgramService make({void Function()? onReconnected}) => DeepgramService(
+  DeepgramService make({
+    void Function()? onReconnected,
+    void Function()? onGaveUp,
+    int maxReconnectAttempts = 10,
+    Duration connectionHealthyAfter = const Duration(seconds: 5),
+  }) =>
+      DeepgramService(
         apiKey: 'k',
         baseUrl: server.url,
         encoding: 'linear16',
@@ -68,6 +90,9 @@ void main() {
         reconnectBaseDelay: const Duration(milliseconds: 50),
         reconnectMaxDelay: const Duration(milliseconds: 200),
         onReconnected: onReconnected,
+        onGaveUp: onGaveUp,
+        maxReconnectAttempts: maxReconnectAttempts,
+        connectionHealthyAfter: connectionHealthyAfter,
       );
 
   test('connect() during a slow disconnect() keeps the new connection', () async {
@@ -171,6 +196,83 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
     expect(server.received.first.whereType<String>(), isEmpty);
+    await dg.disconnect();
+  });
+
+  test('gives up after maxReconnectAttempts failed reconnects and says so',
+      () async {
+    var gaveUp = 0;
+    final dg = make(maxReconnectAttempts: 3, onGaveUp: () => gaveUp++);
+    await dg.connect();
+    await waitFor(() => server.connections.length == 1);
+
+    // Deepgram drops the stream and then rejects every new connection.
+    server.refuse = true;
+    await server.connections.first.close();
+
+    expect(await waitFor(() => gaveUp == 1), isTrue,
+        reason: 'the owner must be told that the service stopped trying');
+    expect(server.refused, 3, reason: 'exactly maxReconnectAttempts retries');
+    expect(dg.isConnected, isFalse);
+
+    // It really stopped: no more attempts, and no second notification.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(server.refused, 3);
+    expect(gaveUp, 1);
+    await dg.disconnect();
+  });
+
+  test('a connection that comes back before the cap is used, with no give-up',
+      () async {
+    var gaveUp = 0;
+    final dg = make(maxReconnectAttempts: 5, onGaveUp: () => gaveUp++);
+    await dg.connect();
+    await waitFor(() => server.connections.length == 1);
+
+    server.refuse = true;
+    await server.connections.first.close();
+    await waitFor(() => server.refused >= 2);
+    server.refuse = false;
+
+    expect(await waitFor(() => dg.isConnected), isTrue);
+    expect(gaveUp, 0);
+    dg.sendAudio(frame());
+    expect(await waitFor(() => audioFrames(server.received.last).isNotEmpty),
+        isTrue);
+    await dg.disconnect();
+  });
+
+  test('connect() after giving up starts a fresh round of attempts', () async {
+    var gaveUp = 0;
+    final dg = make(maxReconnectAttempts: 2, onGaveUp: () => gaveUp++);
+    server.refuse = true;
+    await dg.connect();
+    expect(await waitFor(() => gaveUp == 1), isTrue);
+
+    server.refuse = false;
+    await dg.connect();
+    expect(await waitFor(() => dg.isConnected), isTrue);
+    expect(gaveUp, 1);
+    await dg.disconnect();
+  });
+
+  test('attempts stuck in the handshake still count towards the limit',
+      () async {
+    // Each attempt hangs for longer than connectionHealthyAfter and then
+    // fails. Counting from when the socket was opened would call that
+    // "healthy", reset the count every time, and never give up.
+    var gaveUp = 0;
+    final dg = make(
+      maxReconnectAttempts: 2,
+      connectionHealthyAfter: const Duration(milliseconds: 30),
+      onGaveUp: () => gaveUp++,
+    );
+    server.refuse = true;
+    server.refuseDelay = const Duration(milliseconds: 100);
+    await dg.connect();
+
+    expect(await waitFor(() => gaveUp == 1), isTrue);
+    expect(server.refused, 3, reason: 'the first try plus two reconnects');
     await dg.disconnect();
   });
 }

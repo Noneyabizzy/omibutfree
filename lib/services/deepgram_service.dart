@@ -20,7 +20,11 @@ class DeepgramService {
   Timer? _keepAliveTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  DateTime _connectedAt = DateTime.now();
+
+  /// When the WebSocket handshake finished; null while connecting or when
+  /// there is no connection. A socket that was merely opened (and may still be
+  /// stuck in the handshake) does not count as a working connection.
+  DateTime? _establishedAt;
   DateTime _lastAudioAt = DateTime.now();
 
   final String apiKey;
@@ -35,6 +39,12 @@ class DeepgramService {
   /// anything keyed to them must be reset here.
   final void Function()? onReconnected;
 
+  /// Called once when the connection could not be restored after
+  /// [maxReconnectAttempts] consecutive failed attempts. The service stops
+  /// trying (and [isConnected] stays false) until [connect] is called again,
+  /// so the owner can tell the user instead of showing a stale "Listening".
+  final void Function()? onGaveUp;
+
   /// Streaming endpoint. Overridable so tests can point at a local server.
   final String baseUrl;
 
@@ -45,6 +55,16 @@ class DeepgramService {
   final Duration reconnectBaseDelay;
   final Duration reconnectMaxDelay;
 
+  /// How many reconnects to try in a row before giving up. A connection that
+  /// stays up for a few seconds starts the count over. With the default
+  /// delays the ten attempts span about three minutes (1, 2, 4, 8, 16 s, then
+  /// 30 s each), long enough to ride out a tunnel or a Wi-Fi switch.
+  final int maxReconnectAttempts;
+
+  /// A connection that stayed established this long counts as healthy and
+  /// starts the reconnect count over.
+  final Duration connectionHealthyAfter;
+
   DeepgramService({
     required this.apiKey,
     this.language = 'en',
@@ -53,11 +73,14 @@ class DeepgramService {
     this.onTranscript,
     this.onError,
     this.onReconnected,
+    this.onGaveUp,
     this.baseUrl = 'wss://api.deepgram.com/v1/listen',
     this.keepAliveInterval = const Duration(seconds: 3),
     this.reconnectBaseDelay = const Duration(seconds: 1),
     this.reconnectMaxDelay = const Duration(seconds: 30),
-  });
+    this.maxReconnectAttempts = 10,
+    this.connectionHealthyAfter = const Duration(seconds: 5),
+  }) : assert(maxReconnectAttempts > 0);
 
   bool get isConnected => _isConnected;
 
@@ -90,6 +113,13 @@ class DeepgramService {
         protocols: ['token', apiKey],
       );
       _channel = channel;
+      _establishedAt = null;
+      // A rejected handshake (bad key, no network) is also reported through
+      // the stream below; without this the same error would escape here as
+      // an uncaught async error.
+      unawaited(channel.ready.then<void>((_) {
+        if (identical(channel, _channel)) _establishedAt = DateTime.now();
+      }, onError: (Object _) {}));
 
       _subscription = channel.stream.listen(
         _handleMessage,
@@ -110,8 +140,7 @@ class DeepgramService {
       );
 
       _isConnected = true;
-      _connectedAt = DateTime.now();
-      _lastAudioAt = _connectedAt;
+      _lastAudioAt = DateTime.now();
       _startKeepAlive();
       debugPrint('Connected to Deepgram (encoding: $encoding, sampleRate: $sampleRate)');
     } catch (e) {
@@ -124,12 +153,16 @@ class DeepgramService {
   /// Tear down the dead connection and, if the caller still wants one, open a
   /// new one after a short back-off. Safe to call more than once.
   void _handleConnectionLost() {
-    // A connection that stayed up for a while was healthy, so start the
-    // back-off over; quick repeated failures keep backing off.
-    if (_isConnected &&
-        DateTime.now().difference(_connectedAt) > const Duration(seconds: 5)) {
+    // A connection that stayed established for a while was healthy, so start
+    // the back-off over; quick repeated failures keep backing off. Time spent
+    // in a handshake that never completed does not count, or a network that
+    // makes each attempt hang would never reach the attempt limit.
+    final establishedAt = _establishedAt;
+    if (establishedAt != null &&
+        DateTime.now().difference(establishedAt) > connectionHealthyAfter) {
       _reconnectAttempts = 0;
     }
+    _establishedAt = null;
     _isConnected = false;
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
@@ -148,6 +181,15 @@ class DeepgramService {
 
   void _scheduleReconnect() {
     if (_reconnectTimer?.isActive ?? false) return;
+    if (_reconnectAttempts >= maxReconnectAttempts) {
+      debugPrint(
+        'Deepgram: giving up after $_reconnectAttempts failed reconnect '
+        'attempts',
+      );
+      _wantConnected = false;
+      onGaveUp?.call();
+      return;
+    }
     final factor = 1 << math.min(_reconnectAttempts, 10);
     final delay = Duration(
       milliseconds: math.min(

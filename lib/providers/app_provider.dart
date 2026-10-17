@@ -52,6 +52,18 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   bool _isListening = false;
   bool get isListening => _isListening;
 
+  /// Set when cloud transcription stopped because Deepgram could not be
+  /// reached again; shown on the home page until dismissed or listening is
+  /// started again.
+  String? _transcriptionWarning;
+  String? get transcriptionWarning => _transcriptionWarning;
+
+  void dismissTranscriptionWarning() {
+    if (_transcriptionWarning == null) return;
+    _transcriptionWarning = null;
+    notifyListeners();
+  }
+
   // Phone mic state
   bool _isUsingPhoneMic = false;
   bool get isUsingPhoneMic => _isUsingPhoneMic;
@@ -379,6 +391,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     required bool useOpusEncoding,
   }) async {
     final transcriptionMode = SettingsService.transcriptionMode;
+    _transcriptionWarning = null;
 
     // Validate API keys for cloud mode
     if (transcriptionMode == 'cloud' && !SettingsService.hasDeepgramKey) {
@@ -426,12 +439,14 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
 
       default: // 'cloud'
         debugPrint('Starting with CLOUD Deepgram transcription');
-        _deepgramService = DeepgramService(
+        late final DeepgramService deepgram;
+        deepgram = _deepgramService = DeepgramService(
           apiKey: SettingsService.deepgramApiKey,
           language: SettingsService.language,
           onTranscript: _onTranscriptReceived,
           onError: (error) => debugPrint('Deepgram error: $error'),
           onReconnected: _onDeepgramReconnected,
+          onGaveUp: () => _onDeepgramGaveUp(deepgram),
           // Use linear16 for phone mic (raw PCM), opus for Omi
           encoding: useOpusEncoding ? 'opus' : 'linear16',
           sampleRate: 16000,
@@ -819,6 +834,20 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     }
     _speakerStreamGen++;
     _speakerId?.resetStream();
+  }
+
+  /// Deepgram stayed unreachable through all the reconnect attempts. Listening
+  /// would only throw audio away, so stop (which also saves the conversation
+  /// so far) and leave a warning telling the user why.
+  void _onDeepgramGaveUp(DeepgramService source) {
+    if (!identical(source, _deepgramService)) return; // an old session
+    debugPrint('Deepgram unreachable - stopping listening');
+    _transcriptionWarning =
+        'Lost the connection to Deepgram and could not restore it, so '
+        'listening has stopped. Check your internet connection and API key, '
+        'then start listening again.';
+    notifyListeners();
+    unawaited(stopListening());
   }
 
   /// Send audio to Deepgram and mirror it into the speaker buffer so both share
