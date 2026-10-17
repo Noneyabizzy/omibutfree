@@ -76,14 +76,17 @@ void main() {
   setUp(() async => server = await FakeDeepgram.start());
   tearDown(() async => server.stop());
 
+  /// Creates a service that is disconnected when the test ends, even if the
+  /// test fails before its own cleanup, so no timers or sockets leak into the
+  /// next test.
   DeepgramService make({
     void Function()? onReconnected,
     void Function()? onGaveUp,
     Duration reconnectBaseDelay = const Duration(milliseconds: 50),
     int maxReconnectAttempts = 10,
     Duration connectionHealthyAfter = const Duration(seconds: 5),
-  }) =>
-      DeepgramService(
+  }) {
+    final dg = DeepgramService(
         apiKey: 'k',
         baseUrl: server.url,
         encoding: 'linear16',
@@ -95,6 +98,9 @@ void main() {
         maxReconnectAttempts: maxReconnectAttempts,
         connectionHealthyAfter: connectionHealthyAfter,
       );
+    addTearDown(dg.disconnect);
+    return dg;
+  }
 
   test('connect() during a slow disconnect() keeps the new connection', () async {
     final dg = make();

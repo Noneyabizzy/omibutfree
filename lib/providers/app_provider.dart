@@ -847,6 +847,14 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
         'listening has stopped. Check your internet connection and API key, '
         'then start listening again.';
     notifyListeners();
+    // The banner is on the Live tab only, and listening may stop while the app
+    // is in the background or another tab is open, so also post a notification.
+    NotificationService()
+        .showNotification(
+          'Omi stopped listening',
+          'Could not reach Deepgram. Open the app to start listening again.',
+        )
+        .catchError((Object e) => debugPrint('Notification failed: $e'));
     unawaited(stopListening());
   }
 
