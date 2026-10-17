@@ -79,6 +79,7 @@ void main() {
   DeepgramService make({
     void Function()? onReconnected,
     void Function()? onGaveUp,
+    Duration reconnectBaseDelay = const Duration(milliseconds: 50),
     int maxReconnectAttempts = 10,
     Duration connectionHealthyAfter = const Duration(seconds: 5),
   }) =>
@@ -87,8 +88,8 @@ void main() {
         baseUrl: server.url,
         encoding: 'linear16',
         keepAliveInterval: const Duration(milliseconds: 100),
-        reconnectBaseDelay: const Duration(milliseconds: 50),
-        reconnectMaxDelay: const Duration(milliseconds: 200),
+        reconnectBaseDelay: reconnectBaseDelay,
+        reconnectMaxDelay: const Duration(milliseconds: 600),
         onReconnected: onReconnected,
         onGaveUp: onGaveUp,
         maxReconnectAttempts: maxReconnectAttempts,
@@ -145,13 +146,27 @@ void main() {
   });
 
   test('audio sent while disconnected is dropped, not queued or thrown', () async {
-    final dg = make();
+    // A long first back-off, so the audio below is sent while there is no
+    // connection and the reconnect comes only afterwards.
+    final dg = make(reconnectBaseDelay: const Duration(milliseconds: 300));
     await dg.connect();
     await waitFor(() => server.connections.length == 1);
     await server.connections.first.close();
     expect(await waitFor(() => !dg.isConnected), isTrue,
         reason: 'the client should notice the closed connection');
     expect(() => dg.sendAudio(frame()), returnsNormally);
+
+    // After the reconnect, the dropped frame must not show up on either
+    // connection; only audio sent now goes through.
+    expect(await waitFor(() => server.connections.length == 2), isTrue);
+    expect(await waitFor(() => dg.isConnected), isTrue);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(audioFrames(server.received[0]), isEmpty);
+    expect(audioFrames(server.received[1]), isEmpty,
+        reason: 'a frame sent while disconnected must be dropped, not queued');
+    dg.sendAudio(frame());
+    expect(await waitFor(() => audioFrames(server.received[1]).length == 1),
+        isTrue);
     await dg.disconnect();
   });
 
@@ -167,11 +182,16 @@ void main() {
   });
 
   test('disconnect() stops any further reconnecting', () async {
-    final dg = make();
+    // The server drops the stream, so a reconnect is scheduled (after the
+    // 300 ms back-off); disconnect() before it fires must cancel it.
+    final dg = make(reconnectBaseDelay: const Duration(milliseconds: 300));
     await dg.connect();
     await waitFor(() => server.connections.length == 1);
+    await server.connections.first.close();
+    expect(await waitFor(() => !dg.isConnected), isTrue,
+        reason: 'the client should notice the closed connection');
     await dg.disconnect();
-    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await Future<void>.delayed(const Duration(milliseconds: 700));
     expect(server.connections.length, 1);
     expect(dg.isConnected, isFalse);
   });

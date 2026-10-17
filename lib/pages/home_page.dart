@@ -656,20 +656,29 @@ class _DeviceTabState extends State<DeviceTab> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _getSpeakerColor(segment.speakerId),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  segment.speakerName ?? 'S${segment.speakerId}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
+                              // A person's name can be long; cap the chip so the
+                              // transcript text beside it keeps its space.
+                              ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 120),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _getSpeakerColor(segment.speakerId),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    segment.speakerName ??
+                                        'S${segment.speakerId}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
                               ),

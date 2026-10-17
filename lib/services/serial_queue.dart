@@ -3,6 +3,10 @@
 /// A failing operation does not stop the ones after it; its error goes to its
 /// own caller only. Callers must await the future returned by [run] (or handle
 /// its error): the queue itself does not report a failure nobody is waiting on.
+///
+/// Not reentrant: an operation must not await another [run] on the same queue.
+/// That call starts only after the running operation finishes, and the running
+/// operation is waiting for it, so both would wait forever.
 class SerialQueue {
   Future<void> _tail = Future<void>.value();
 
