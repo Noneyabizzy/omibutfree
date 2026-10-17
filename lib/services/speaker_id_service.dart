@@ -145,6 +145,7 @@ class SpeakerIdService {
     // Unique per download, so overlapping downloads cannot write to one file.
     final partial = File('${target.path}.${DateTime.now().microsecondsSinceEpoch}.part');
     final client = http.Client();
+    IOSink? sink;
     try {
       final response = await client
           .send(http.Request('GET', Uri.parse(modelUrl)))
@@ -152,7 +153,7 @@ class SpeakerIdService {
       if (response.statusCode != 200) {
         throw Exception('Speaker model download failed (HTTP ${response.statusCode})');
       }
-      final sink = partial.openWrite();
+      sink = partial.openWrite();
       // A stalled connection fails the download (and a later call retries).
       await response.stream.timeout(downloadTimeout).pipe(sink);
       if (partial.lengthSync() != modelSizeBytes ||
@@ -161,6 +162,11 @@ class SpeakerIdService {
       }
       await partial.rename(target.path);
     } catch (e) {
+      // pipe() only closes the sink when the stream finishes, so close it here
+      // when the download failed or timed out part-way.
+      try {
+        await sink?.close();
+      } catch (_) {}
       if (partial.existsSync()) partial.deleteSync();
       rethrow;
     } finally {

@@ -530,6 +530,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     // Voice samples gathered for this conversation's speakers (kept so the
     // user can label them later). Taken before the session is reset below.
     final speakerEmbeddings = _speakerId?.session.snapshotEmbeddings();
+    final voiceEpoch = _voiceDataEpoch;
 
     // Start new conversation immediately so listening continues
     _startNewConversation();
@@ -631,10 +632,15 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     // Save to database
     await DatabaseService.saveConversation(conversationToSave);
     if (speakerEmbeddings != null && speakerEmbeddings.isNotEmpty) {
-      await DatabaseService.saveConversationSpeakers(
-        conversationToSave.id,
-        speakerEmbeddings,
-      );
+      await _queueVoiceWrite(() async {
+        // "Delete all voice data" ran after these samples were taken: they
+        // must not be written back.
+        if (voiceEpoch != _voiceDataEpoch) return;
+        await DatabaseService.saveConversationSpeakers(
+          conversationToSave.id,
+          speakerEmbeddings,
+        );
+      });
     }
     // Expire old voice clips while the app keeps running, not only at start.
     await DatabaseService.purgeOldConversationSpeakers();
@@ -749,6 +755,20 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
         if (name != null) s.speakerName = name;
       }
     }
+  }
+
+  /// Bumped by "Delete all voice data"; a conversation save that captured its
+  /// voice samples before that must not write them afterwards.
+  int _voiceDataEpoch = 0;
+
+  /// Voice-sample writes run one after another, so a save and a delete-all
+  /// cannot interleave.
+  Future<void> _voiceWrites = Future.value();
+
+  Future<void> _queueVoiceWrite(Future<void> Function() op) {
+    final run = _voiceWrites.then((_) => op());
+    _voiceWrites = run.catchError((Object _) {});
+    return run;
   }
 
   /// Applies a changed match threshold to the running session.
@@ -1034,7 +1054,8 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   /// Deletes every stored voice sample: those learned for named people (the
   /// people keep their names) and those kept for labelling saved conversations.
   Future<void> deleteAllVoiceData() async {
-    await DatabaseService.deleteAllVoiceData();
+    _voiceDataEpoch++;
+    await _queueVoiceWrite(DatabaseService.deleteAllVoiceData);
     for (final p in _people) {
       _speakerId?.session.forgetPerson(p.id);
     }

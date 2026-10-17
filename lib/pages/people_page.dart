@@ -132,8 +132,11 @@ class PeoplePage extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         title: Text('Delete $name?'),
         content: const Text(
-          'Their saved voice samples are deleted, so they will no longer be '
-          'recognised. Names already shown in past transcripts stay as text.',
+          'Their saved voice samples are deleted, including those kept for '
+          'speakers named as them in past conversations, so they will no '
+          'longer be recognised. Names already shown in past transcripts stay '
+          'as text. Samples of speakers you never named are kept until they '
+          'expire; "Delete all voice data" removes those too.',
         ),
         actions: [
           TextButton(

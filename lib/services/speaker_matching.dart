@@ -257,7 +257,11 @@ class SpeakerSession {
   SpeakerProfile? resolvedFor(int speakerId) => _resolved[speakerId];
 
   /// Re-evaluate [speakerId] from the embeddings gathered so far and return the
-  /// result (also remembered for [resolvedFor]).
+  /// match for those clips. A match is remembered for [resolvedFor]. When the
+  /// clips match nobody, the returned `profile` is null but [resolvedFor] keeps
+  /// the earlier name until at least [_clearAfter] clips have failed to match,
+  /// so one noisy clip does not drop a name. Use [resolvedFor] for the name to
+  /// show.
   MatchResult? resolve(int speakerId) {
     final embs = _embeddings[speakerId];
     if (embs == null || embs.isEmpty) return null;

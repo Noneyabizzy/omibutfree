@@ -297,11 +297,36 @@ ${c.transcript}
     await db.update('people', {'name': name}, where: 'id = ?', whereArgs: [id]);
   }
 
-  /// Deletes the person and all of their voice samples. Transcript segments
-  /// that were labelled with their name keep the text label.
+  /// Deletes the person and all of their voice samples, including the samples
+  /// kept for labelling the speakers named as them in past conversations.
+  /// Transcript segments that were labelled with their name keep the text
+  /// label. (Samples of a speaker that was never named stay until they expire.)
   static Future<void> deletePerson(String id) async {
     final db = await database;
     await db.transaction((txn) async {
+      final rows = await txn.query(
+        'conversations',
+        columns: ['id', 'transcript'],
+        where: 'transcript LIKE ?',
+        whereArgs: ['%$id%'],
+      );
+      for (final row in rows) {
+        final transcript = row['transcript'] as String?;
+        if (transcript == null || transcript.isEmpty) continue;
+        final speakers = <int>{};
+        for (final s in jsonDecode(transcript) as List) {
+          if (s is Map && s['person_id'] == id && s['speaker_id'] is num) {
+            speakers.add((s['speaker_id'] as num).toInt());
+          }
+        }
+        for (final speaker in speakers) {
+          await txn.delete(
+            'conversation_speakers',
+            where: 'conversation_id = ? AND speaker_id = ?',
+            whereArgs: [row['id'], speaker],
+          );
+        }
+      }
       await txn.delete('person_embeddings', where: 'person_id = ?', whereArgs: [id]);
       await txn.delete('people', where: 'id = ?', whereArgs: [id]);
     });

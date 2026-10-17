@@ -368,7 +368,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   leading: const Icon(Icons.record_voice_over),
                   title: const Text('People & Voices', style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(
-                    '${Provider.of<AppProvider>(context).people.length} saved',
+                    '${context.select<AppProvider, int>((p) => p.people.length)} saved',
                     style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13)),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.push(

@@ -31,7 +31,8 @@ class TranscriptSegment {
     this.personId,
   });
 
-  /// What to show in the UI and feed to the summariser.
+  /// The full label for text: the summariser and dialogs. Compact chips and
+  /// avatars show `S1`, `S2`, ... for an unnamed speaker instead.
   String get displayName => speakerName ?? 'Speaker $speakerId';
 
   Map<String, dynamic> toJson() => {
