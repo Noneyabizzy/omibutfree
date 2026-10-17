@@ -751,8 +751,9 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     applyPersonNames(_conversations, {for (final p in _people) p.id: p.name});
   }
 
-  /// Bumped by "Delete all voice data"; a conversation save that captured its
-  /// voice samples before that must not write them afterwards.
+  /// Bumped by "Delete all voice data" and when recognition is turned off; a
+  /// conversation save that captured its voice samples before that must not
+  /// write them afterwards.
   int _voiceDataEpoch = 0;
 
   /// Voice-sample changes (saving a conversation's samples, labelling a
@@ -769,11 +770,13 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   /// Stops recognition in the running session (the setting was turned off):
-  /// no more voice samples are computed or kept, and queued work is dropped.
+  /// no more voice samples are computed or kept, and queued work is dropped,
+  /// including samples a conversation save captured but has not written yet.
   void stopSpeakerRecognition() {
     _speakerId?.dispose();
     _speakerId = null;
     _speakerStreamGen++;
+    _voiceDataEpoch++;
   }
 
   /// Start speaker recognition for a new Deepgram stream.
@@ -979,7 +982,10 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     // then enroll their voice samples under the chosen person. One queued
     // step, so a "Delete all voice data" cannot run between reading the
     // samples and writing them.
-    final samples = await _queueVoiceWrite(() async {
+    final samples = await _queueVoiceWrite<List<Float32List>?>(() async {
+      // The person may have been deleted since the sheet was opened.
+      final people = await DatabaseService.getPeople();
+      if (!people.any((p) => p.id == id)) return null;
       await DatabaseService.removeEnrollmentsFor(conversation.id, speakerId);
       final found = await DatabaseService.getConversationSpeakerEmbeddings(
         conversation.id,
@@ -995,6 +1001,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
       }
       return found;
     });
+    if (samples == null) return 0; // person was deleted meanwhile; nothing changed
 
     for (final seg in conversation.segments) {
       if (seg.speakerId == speakerId) {
@@ -1014,7 +1021,9 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     required Conversation conversation,
     required int speakerId,
   }) async {
-    await DatabaseService.removeEnrollmentsFor(conversation.id, speakerId);
+    await _queueVoiceWrite(
+      () => DatabaseService.removeEnrollmentsFor(conversation.id, speakerId),
+    );
     for (final seg in conversation.segments) {
       if (seg.speakerId == speakerId) {
         seg.speakerName = null;
@@ -1042,7 +1051,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
 
   /// Deletes a person and their voice samples. Transcripts keep the name text.
   Future<void> deletePerson(String personId) async {
-    await DatabaseService.deletePerson(personId);
+    await _queueVoiceWrite(() => DatabaseService.deletePerson(personId));
     _speakerId?.session.forgetPerson(personId);
     await loadPeople();
   }
