@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/conversation.dart';
 import '../providers/app_provider.dart';
+import '../services/database_service.dart';
+import '../services/settings_service.dart';
 
 class ConversationDetailPage extends StatefulWidget {
   final Conversation conversation;
@@ -119,7 +121,9 @@ class _ConversationDetailPageState extends State<ConversationDetailPage> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Tap a speaker to name them - the app learns their voice',
+                SettingsService.speakerIdEnabled
+                    ? 'Tap a speaker to name them - the app learns their voice'
+                    : 'Tap a speaker to name them',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
               ),
               const SizedBox(height: 8),
@@ -201,9 +205,15 @@ class _ConversationDetailPageState extends State<ConversationDetailPage> {
         content: Text(
           learned > 0
               ? 'Labelled as $name - learned from $learned voice sample${learned == 1 ? '' : 's'}'
-              : 'Labelled as $name. No voice sample was captured for this '
-                  'speaker, so the app could not learn their voice from this '
-                  'conversation (turn on Speaker recognition in Settings).',
+              : SettingsService.speakerIdEnabled
+                  ? 'Labelled as $name. No voice sample is stored for this '
+                      'speaker (too little speech, recognition was off, or the '
+                      'samples were deleted after '
+                      '${DatabaseService.voiceClipRetentionDays} days), so '
+                      'the app could not learn their voice from it.'
+                  : 'Labelled as $name. To let the app learn voices from '
+                      'future conversations, turn on "Recognise speakers" in '
+                      'Settings.',
         ),
         duration: const Duration(seconds: 5),
       ),
@@ -233,46 +243,67 @@ class _TranscriptRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          GestureDetector(
-            onTap: onSpeakerTap,
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: _getSpeakerColor(segment.speakerId),
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  named
-                      ? segment.speakerName!.characters.first.toUpperCase()
-                      : 'S${segment.speakerId}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+          // A button for screen readers, with a 48 dp touch target around the
+          // 32 dp avatar.
+          Semantics(
+            button: true,
+            excludeSemantics: true,
+            label: named
+                ? 'Change speaker ${segment.speakerName}'
+                : 'Name speaker ${segment.speakerId}',
+            child: InkWell(
+              onTap: onSpeakerTap,
+              customBorder: const CircleBorder(),
+              child: SizedBox(
+                width: 48,
+                height: 48,
+                child: Center(
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: _getSpeakerColor(segment.speakerId),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text(
+                        named
+                            ? segment.speakerName!.characters.first.toUpperCase()
+                            : 'S${segment.speakerId}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 4),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                GestureDetector(
-                  onTap: onSpeakerTap,
-                  child: Text(
-                    segment.displayName,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: named ? Colors.white : Colors.grey.shade400,
-                      fontSize: 12,
+                // Same action as the avatar button, so hidden from screen readers.
+                ExcludeSemantics(
+                  child: InkWell(
+                    onTap: onSpeakerTap,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 4),
+                      child: Text(
+                        segment.displayName,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: named ? Colors.white : Colors.grey.shade400,
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 4),
                 Text(segment.text),
               ],
             ),

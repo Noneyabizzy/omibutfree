@@ -166,7 +166,27 @@ class DatabaseService {
       orderBy: 'created_at DESC',
       limit: limit,
     );
-    return rows.map((row) => Conversation.fromDbRow(row)).toList();
+    final conversations = rows.map((row) => Conversation.fromDbRow(row)).toList();
+    await _applyPersonNames(db, conversations);
+    return conversations;
+  }
+
+  /// Transcript segments store the name a person had when they were labelled.
+  /// Look the current name up by person id, so a rename shows everywhere
+  /// (including exports) without rewriting every conversation.
+  static Future<void> _applyPersonNames(
+    Database db,
+    List<Conversation> conversations,
+  ) async {
+    final rows = await db.query('people', columns: ['id', 'name']);
+    if (rows.isEmpty) return;
+    final names = {for (final r in rows) r['id'] as String: r['name'] as String};
+    for (final c in conversations) {
+      for (final s in c.segments) {
+        final name = s.personId == null ? null : names[s.personId];
+        if (name != null) s.speakerName = name;
+      }
+    }
   }
 
   static Future<Conversation?> getConversation(String id) async {
@@ -177,7 +197,9 @@ class DatabaseService {
       whereArgs: [id],
     );
     if (rows.isEmpty) return null;
-    return Conversation.fromDbRow(rows.first);
+    final conversation = Conversation.fromDbRow(rows.first);
+    await _applyPersonNames(db, [conversation]);
+    return conversation;
   }
 
   static Future<void> deleteConversation(String id) async {
@@ -279,8 +301,41 @@ ${c.transcript}
   /// that were labelled with their name keep the text label.
   static Future<void> deletePerson(String id) async {
     final db = await database;
-    await db.delete('person_embeddings', where: 'person_id = ?', whereArgs: [id]);
-    await db.delete('people', where: 'id = ?', whereArgs: [id]);
+    await db.transaction((txn) async {
+      await txn.delete('person_embeddings', where: 'person_id = ?', whereArgs: [id]);
+      await txn.delete('people', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  /// How long the voice samples kept for labelling a conversation's speakers
+  /// are retained. Samples copied to a named person are kept until deleted.
+  static const int voiceClipRetentionDays = 14;
+
+  /// Deletes the labelling samples of conversations older than [days]. Returns
+  /// how many rows were removed.
+  static Future<int> purgeOldConversationSpeakers({
+    int days = voiceClipRetentionDays,
+    DateTime? now,
+  }) async {
+    final db = await database;
+    final cutoff = (now ?? DateTime.now())
+        .subtract(Duration(days: days))
+        .millisecondsSinceEpoch;
+    return db.rawDelete(
+      'DELETE FROM conversation_speakers WHERE conversation_id IN '
+      '(SELECT id FROM conversations WHERE created_at < ?)',
+      [cutoff],
+    );
+  }
+
+  /// Deletes every stored voice sample (named people's and per-conversation).
+  /// People keep their names.
+  static Future<void> deleteAllVoiceData() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('conversation_speakers');
+      await txn.delete('person_embeddings');
+    });
   }
 
   /// Remove voice samples previously learned from this conversation speaker
@@ -500,13 +555,24 @@ ${c.transcript}
     final conversations = await getConversations(limit: 10000);
     final memories = await getMemories(limit: 10000);
     final tasks = await getTasks(limit: 10000);
-    
+    final people = await getPeople();
+
     return {
       'export_date': DateTime.now().toIso8601String(),
       'app_version': '2.1.0',
       'conversations': conversations.map((c) => c.toJson()).toList(),
       'memories': memories.map((m) => m.toJson()).toList(),
       'tasks': tasks.map((t) => t.toJson()).toList(),
+      // Names of labelled people, so `person_id` in the transcripts resolves.
+      // Voice samples (voiceprints) are deliberately not exported.
+      'people': [
+        for (final p in people)
+          {
+            'id': p.id,
+            'name': p.name,
+            'created_at': p.createdAt.millisecondsSinceEpoch,
+          },
+      ],
     };
   }
 }

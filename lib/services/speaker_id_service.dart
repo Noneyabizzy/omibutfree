@@ -39,8 +39,8 @@ class SpeakerIdService {
   /// Licence note: the file is hosted by the sherpa-onnx author on Hugging Face
   /// (no model card there). WeSpeaker's docs state that its pretrained models
   /// follow the licence of their training dataset; VoxCeleb is published under
-  /// CC BY 4.0 'for research purposes'. Fine for personal use; check those terms
-  /// yourself before any commercial use. See README 'Credits'.
+  /// CC BY 4.0 'for research purposes'. Read those terms yourself before using
+  /// or redistributing the model. See README 'Credits'.
   ///
   /// ~26 MB. Other models from the same repo can be swapped in here; saved
   /// voice samples from a different model are ignored automatically because
@@ -73,6 +73,7 @@ class SpeakerIdService {
   sherpa.SpeakerEmbeddingExtractor? _extractor;
   Future<void>? _initFuture;
   int _lastFrameBytes = 0;
+  bool _disposed = false;
 
   /// True once the model is loaded and [embed] can be used.
   bool get isReady => _extractor != null;
@@ -89,10 +90,15 @@ class SpeakerIdService {
 
   /// Downloads the model on first use, then loads it. Safe to call repeatedly;
   /// concurrent calls share one run. Throws if the download/load fails.
-  Future<void> initialize() => _initFuture ??= _initialize().catchError((e) {
-        _initFuture = null; // allow a retry
-        throw e;
-      });
+  Future<void> initialize() {
+    if (_disposed) {
+      return Future.error(StateError('SpeakerIdService was disposed'));
+    }
+    return _initFuture ??= _initialize().catchError((e) {
+      _initFuture = null; // allow a retry
+      throw e;
+    });
+  }
 
   Future<void> _initialize() async {
     final path = await _modelPath();
@@ -100,6 +106,9 @@ class SpeakerIdService {
     if (!file.existsSync() || file.lengthSync() < 1024 * 1024) {
       await _download(file);
     }
+    // dispose() may have run while the download was in progress; loading now
+    // would create an extractor that nothing frees.
+    if (_disposed) return;
     loadModelFromFile(path);
   }
 
@@ -107,6 +116,7 @@ class SpeakerIdService {
   /// local model without going through the download.)
   @visibleForTesting
   void loadModelFromFile(String path) {
+    if (_disposed) return;
     sherpa.initBindings();
     _extractor = sherpa.SpeakerEmbeddingExtractor(
       config: sherpa.SpeakerEmbeddingExtractorConfig(
@@ -121,7 +131,8 @@ class SpeakerIdService {
   Future<void> _download(File target) async {
     debugPrint('Downloading speaker model from $modelUrl');
     await target.parent.create(recursive: true);
-    final partial = File('${target.path}.part');
+    // Unique per download, so overlapping downloads cannot write to one file.
+    final partial = File('${target.path}.${DateTime.now().microsecondsSinceEpoch}.part');
     final client = http.Client();
     try {
       final response = await client.send(http.Request('GET', Uri.parse(modelUrl)));
@@ -151,8 +162,12 @@ class SpeakerIdService {
     if (pcm != null) {
       _lastFrameBytes = pcm.length;
       buffer.add(pcm);
-    } else if (_lastFrameBytes > 0) {
-      buffer.addSilence(_lastFrameBytes ~/ 2);
+    } else {
+      // Keep the timeline aligned with what was sent to Deepgram. If no frame
+      // has decoded yet, assume a 20 ms frame (an assumption, not measured).
+      buffer.addSilence(
+        _lastFrameBytes > 0 ? _lastFrameBytes ~/ 2 : buffer.sampleRate ~/ 50,
+      );
     }
   }
 
@@ -160,6 +175,7 @@ class SpeakerIdService {
   void resetStream() {
     buffer.reset();
     _lastFrameBytes = 0;
+    session.startNewStream();
   }
 
   // --- Embedding ---------------------------------------------------------
@@ -196,6 +212,7 @@ class SpeakerIdService {
   void updateThreshold(double value) => matcher.threshold = value;
 
   void dispose() {
+    _disposed = true;
     _extractor?.free();
     _extractor = null;
     _initFuture = null;

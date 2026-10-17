@@ -209,8 +209,23 @@ void main() {
       }
       final snap = s.snapshotEmbeddings();
       expect(snap[0]!.length, 3);
+      final first = snap[0]!.first;
+      // Later changes to the session must not reach the snapshot.
+      s.addEmbedding(0, voice(1, clipSeed: 99));
+      expect(snap[0]!.length, 3);
+      expect(identical(snap[0]!.first, first), isTrue);
       s.startNewConversation();
       expect(snap[0]!.length, 3, reason: 'snapshot survives the reset');
+    });
+
+    test('startNewStream forgets both embeddings and resolved names', () {
+      final s = session();
+      s.addEmbedding(0, voice(1, clipSeed: 50));
+      s.resolve(0);
+      expect(s.resolvedFor(0)?.name, 'Alice');
+      s.startNewStream();
+      expect(s.resolvedFor(0), isNull);
+      expect(s.snapshotEmbeddings(), isEmpty);
     });
 
     test('forgetPerson clears resolutions for a deleted person', () {

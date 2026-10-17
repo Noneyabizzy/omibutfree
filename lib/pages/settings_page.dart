@@ -310,7 +310,12 @@ class _SettingsPageState extends State<SettingsPage> {
                         : 'Only works with the Cloud (Deepgram) transcription engine.',
                     style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13)),
                   value: SettingsService.speakerIdEnabled,
-                  onChanged: (value) {
+                  onChanged: (value) async {
+                    if (value) {
+                      final ok = await _confirmVoiceprints();
+                      if (ok != true) return;
+                    }
+                    if (!mounted) return;
                     setState(() => SettingsService.speakerIdEnabled = value);
                   },
                   activeThumbColor: const Color(0xFF6C5CE7),
@@ -346,20 +351,22 @@ class _SettingsPageState extends State<SettingsPage> {
                       'Higher = fewer wrong names but more speakers left unnamed. Lower it a little if people you have labelled are not being recognised; raise it if strangers get named.',
                       style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13)),
                   ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.record_voice_over),
-                    title: const Text('People & Voices', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(
-                      '${Provider.of<AppProvider>(context).people.length} saved',
-                      style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13)),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const PeoplePage()),
-                    ),
-                  ),
                 ],
+                // Always available, so saved voices can be reviewed and deleted
+                // even while recognition is switched off.
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.record_voice_over),
+                  title: const Text('People & Voices', style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    '${Provider.of<AppProvider>(context).people.length} saved',
+                    style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13)),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const PeoplePage()),
+                  ),
+                ),
               ],
             ),
           ),
@@ -577,6 +584,43 @@ class _SettingsPageState extends State<SettingsPage> {
     _deepgramController.dispose();
     _openaiController.dispose();
     super.dispose();
+  }
+
+  /// Voiceprints are biometric data in some places, so ask before turning the
+  /// feature on and say what is stored, where and for how long.
+  Future<bool?> _confirmVoiceprints() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Recognise speakers by voice?'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'While listening, the app computes a voiceprint (a numeric summary '
+            'of how a voice sounds) for every voice it hears, and stores them '
+            'in its local database on this device. Audio itself is not kept by '
+            'this feature, but it is still sent to Deepgram for transcription '
+            'as before.\n\n'
+            'Voiceprints from a conversation are deleted after '
+            '${DatabaseService.voiceClipRetentionDays} days unless you name '
+            'that speaker. Samples of people you name are kept until you '
+            'delete them under People & Voices, where you can also delete all '
+            'voice data. Device backups may include the database.\n\n'
+            'Only record people who are fine with this; voiceprints count as '
+            'biometric data in some places.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Turn on'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _exportAllData(BuildContext context) async {

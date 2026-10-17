@@ -12,7 +12,26 @@ class PeoplePage extends StatelessWidget {
     final people = provider.people;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('People & Voices')),
+      appBar: AppBar(
+        title: const Text('People & Voices'),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            onSelected: (action) async {
+              if (action == 'delete_all') {
+                final ok = await _confirmDeleteAll(context);
+                if (ok == true) await provider.deleteAllVoiceData();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'delete_all',
+                child: Text('Delete all voice data'),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: people.isEmpty
           ? const Center(
               child: Padding(
@@ -43,7 +62,17 @@ class PeoplePage extends StatelessWidget {
                         if (action == 'rename') {
                           final name = await _askName(context, p.name);
                           if (name != null && name.trim().isNotEmpty) {
-                            await provider.renamePerson(p.id, name);
+                            final renamed = await provider.renamePerson(p.id, name);
+                            if (!renamed && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Someone called "${name.trim()}" already exists. '
+                                    'Delete or rename that person first.',
+                                  ),
+                                ),
+                              );
+                            }
                           }
                         } else if (action == 'delete') {
                           final ok = await _confirmDelete(context, p.name);
@@ -68,6 +97,31 @@ class PeoplePage extends StatelessWidget {
     return showDialog<String>(
       context: context,
       builder: (_) => _RenameDialog(initial: current),
+    );
+  }
+
+  Future<bool?> _confirmDeleteAll(BuildContext context) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete all voice data?'),
+        content: const Text(
+          'Every saved voice sample is deleted: those learned for the people '
+          'listed here and those kept for naming speakers in past '
+          'conversations. People keep their names but will no longer be '
+          'recognised until you name them again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
     );
   }
 

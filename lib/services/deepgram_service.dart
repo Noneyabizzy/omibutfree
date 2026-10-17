@@ -1,6 +1,7 @@
 /// Direct Deepgram WebSocket service for speech-to-text
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -11,14 +12,39 @@ class DeepgramService {
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   bool _isConnected = false;
-  
+
+  /// True between [connect] and [disconnect]. While it is set, a connection
+  /// that drops (Deepgram closes idle or broken streams) is re-opened instead
+  /// of leaving the app "listening" with nobody on the other end.
+  bool _wantConnected = false;
+  Timer? _keepAliveTimer;
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+  DateTime _connectedAt = DateTime.now();
+  DateTime _lastAudioAt = DateTime.now();
+
   final String apiKey;
   final String language;
   final String encoding;
   final int sampleRate;
   final Function(List<TranscriptSegment>)? onTranscript;
   final Function(String)? onError;
-  
+
+  /// Called just before a dropped connection is re-opened. Deepgram's stream
+  /// clock and "speaker N" numbering start over on a new connection, so
+  /// anything keyed to them must be reset here.
+  final void Function()? onReconnected;
+
+  /// Streaming endpoint. Overridable so tests can point at a local server.
+  final String baseUrl;
+
+  /// How often to check whether a KeepAlive is needed.
+  final Duration keepAliveInterval;
+
+  /// First reconnect delay; doubles per failed attempt up to [reconnectMaxDelay].
+  final Duration reconnectBaseDelay;
+  final Duration reconnectMaxDelay;
+
   DeepgramService({
     required this.apiKey,
     this.language = 'en',
@@ -26,17 +52,30 @@ class DeepgramService {
     this.sampleRate = 16000,
     this.onTranscript,
     this.onError,
+    this.onReconnected,
+    this.baseUrl = 'wss://api.deepgram.com/v1/listen',
+    this.keepAliveInterval = const Duration(seconds: 3),
+    this.reconnectBaseDelay = const Duration(seconds: 1),
+    this.reconnectMaxDelay = const Duration(seconds: 30),
   });
 
   bool get isConnected => _isConnected;
 
   Future<void> connect() async {
     if (_isConnected) return;
-    
+    _wantConnected = true;
+    _reconnectAttempts = 0;
+    _openSocket();
+  }
+
+  void _openSocket() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+
     try {
       // Deepgram WebSocket URL with parameters
       final uri = Uri.parse(
-        'wss://api.deepgram.com/v1/listen'
+        '$baseUrl'
         '?model=nova-2'
         '&language=$language'
         '&punctuate=true'
@@ -46,31 +85,105 @@ class DeepgramService {
         '&channels=1'
       );
 
-      _channel = WebSocketChannel.connect(
+      final channel = WebSocketChannel.connect(
         uri,
         protocols: ['token', apiKey],
       );
+      _channel = channel;
 
-      _subscription = _channel!.stream.listen(
+      _subscription = channel.stream.listen(
         _handleMessage,
         onError: (error) {
+          if (!identical(channel, _channel)) return; // an old connection
           debugPrint('Deepgram WebSocket error: $error');
           onError?.call(error.toString());
-          _isConnected = false;
+          _handleConnectionLost();
         },
         onDone: () {
-          debugPrint('Deepgram WebSocket closed');
-          _isConnected = false;
+          if (!identical(channel, _channel)) return; // an old connection
+          debugPrint(
+            'Deepgram WebSocket closed '
+            '(code ${channel.closeCode}, reason "${channel.closeReason}")',
+          );
+          _handleConnectionLost();
         },
       );
 
       _isConnected = true;
+      _connectedAt = DateTime.now();
+      _lastAudioAt = _connectedAt;
+      _startKeepAlive();
       debugPrint('Connected to Deepgram (encoding: $encoding, sampleRate: $sampleRate)');
     } catch (e) {
       debugPrint('Failed to connect to Deepgram: $e');
       onError?.call(e.toString());
-      _isConnected = false;
+      _handleConnectionLost();
     }
+  }
+
+  /// Tear down the dead connection and, if the caller still wants one, open a
+  /// new one after a short back-off. Safe to call more than once.
+  void _handleConnectionLost() {
+    // A connection that stayed up for a while was healthy, so start the
+    // back-off over; quick repeated failures keep backing off.
+    if (_isConnected &&
+        DateTime.now().difference(_connectedAt) > const Duration(seconds: 5)) {
+      _reconnectAttempts = 0;
+    }
+    _isConnected = false;
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
+
+    final subscription = _subscription;
+    final channel = _channel;
+    _subscription = null;
+    _channel = null;
+    subscription?.cancel();
+    if (channel != null) {
+      unawaited(channel.sink.close().catchError((Object _) {}));
+    }
+
+    if (_wantConnected) _scheduleReconnect();
+  }
+
+  void _scheduleReconnect() {
+    if (_reconnectTimer?.isActive ?? false) return;
+    final factor = 1 << math.min(_reconnectAttempts, 10);
+    final delay = Duration(
+      milliseconds: math.min(
+        reconnectMaxDelay.inMilliseconds,
+        reconnectBaseDelay.inMilliseconds * factor,
+      ),
+    );
+    _reconnectAttempts++;
+    debugPrint(
+      'Deepgram connection lost - reconnecting in ${delay.inMilliseconds} ms '
+      '(attempt $_reconnectAttempts)',
+    );
+    _reconnectTimer = Timer(delay, () {
+      _reconnectTimer = null;
+      if (!_wantConnected) return;
+      onReconnected?.call();
+      _openSocket();
+    });
+  }
+
+  /// Deepgram closes a stream that gets neither audio nor a KeepAlive for
+  /// 10 seconds (documented at developers.deepgram.com/docs/audio-keep-alive,
+  /// which asks for a KeepAlive text frame every 3-5 seconds). Audio normally
+  /// flows constantly, but it can pause, e.g. while an AI query is processed.
+  void _startKeepAlive() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = Timer.periodic(keepAliveInterval, (_) {
+      final channel = _channel;
+      if (!_isConnected || channel == null) return;
+      if (DateTime.now().difference(_lastAudioAt) < keepAliveInterval) return;
+      try {
+        channel.sink.add(jsonEncode({'type': 'KeepAlive'}));
+      } catch (e) {
+        debugPrint('Deepgram KeepAlive failed: $e');
+      }
+    });
   }
 
   void _handleMessage(dynamic message) {
@@ -144,13 +257,26 @@ class DeepgramService {
   }
 
   void sendAudio(Uint8List audioData) {
-    if (!_isConnected || _channel == null) return;
-    _channel!.sink.add(audioData);
+    final channel = _channel;
+    if (!_isConnected || channel == null) return;
+    _lastAudioAt = DateTime.now();
+    try {
+      channel.sink.add(audioData);
+    } catch (e) {
+      debugPrint('Deepgram send failed: $e');
+      _handleConnectionLost();
+    }
   }
 
   Future<void> disconnect() async {
+    _wantConnected = false;
     _isConnected = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
     await _subscription?.cancel();
+    _subscription = null;
     await _channel?.sink.close();
     _channel = null;
     debugPrint('Disconnected from Deepgram');

@@ -57,6 +57,64 @@ class TranscriptSegment {
   }
 }
 
+/// True if two segments are from the same voice: the same Deepgram speaker
+/// number, or both recognised as the same person. (Deepgram's live diarization
+/// can flip one voice between two numbers, but recognition still names both
+/// as the same person.)
+bool _sameVoice(TranscriptSegment a, TranscriptSegment b) =>
+    a.speakerId == b.speakerId ||
+    (a.personId != null && a.personId == b.personId);
+
+/// Appends [incoming] to [target], joining a segment onto the previous one when
+/// both are from the same voice and the pause between them is short.
+///
+/// Deepgram sends a new result after every pause, so one person talking with
+/// pauses would otherwise show up as a string of small blocks. A different
+/// speaker in between, or a long gap, still starts a new block. A timestamp
+/// that jumps backwards (a new Deepgram stream restarts its clock) never
+/// merges.
+void appendSegmentsMerged(
+  List<TranscriptSegment> target,
+  List<TranscriptSegment> incoming, {
+  double maxGapSeconds = 10,
+}) {
+  for (final seg in incoming) {
+    if (target.isNotEmpty) {
+      final last = target.last;
+      final gap = seg.startTime - last.endTime;
+      if (_sameVoice(last, seg) &&
+          gap >= -1.0 &&
+          gap <= maxGapSeconds) {
+        target[target.length - 1] = TranscriptSegment(
+          text: '${last.text} ${seg.text}'.trim(),
+          speakerId: last.speakerId,
+          startTime: last.startTime,
+          endTime: seg.endTime > last.endTime ? seg.endTime : last.endTime,
+          isUser: last.isUser || seg.isUser,
+          speakerName: seg.speakerName ?? last.speakerName,
+          personId: seg.personId ?? last.personId,
+        );
+        continue;
+      }
+    }
+    target.add(seg);
+  }
+}
+
+/// Re-applies [appendSegmentsMerged] to [segments] in place. Used after speaker
+/// recognition names segments that arrived unnamed, which can make neighbouring
+/// blocks belong to the same person.
+void mergeAdjacentSegments(
+  List<TranscriptSegment> segments, {
+  double maxGapSeconds = 10,
+}) {
+  final merged = <TranscriptSegment>[];
+  appendSegmentsMerged(merged, segments, maxGapSeconds: maxGapSeconds);
+  segments
+    ..clear()
+    ..addAll(merged);
+}
+
 /// A person whose voice has been enrolled for automatic recognition.
 class Person {
   final String id;

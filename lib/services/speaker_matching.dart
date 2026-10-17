@@ -278,6 +278,14 @@ class SpeakerSession {
   /// Call when a new conversation starts: forget embeddings, keep names.
   void startNewConversation() => _embeddings.clear();
 
+  /// Call when Deepgram starts a new stream (e.g. after a reconnect): its
+  /// "speaker N" numbers start over, so neither the collected embeddings nor
+  /// the names resolved from them still apply.
+  void startNewStream() {
+    _embeddings.clear();
+    _resolved.clear();
+  }
+
   /// Drop everything tied to a person (e.g. they were deleted).
   void forgetPerson(String personId) {
     _resolved.removeWhere((_, p) => p.id == personId);
