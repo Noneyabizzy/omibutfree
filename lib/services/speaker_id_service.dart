@@ -16,6 +16,7 @@
 // beyond what Deepgram already receives for transcription.
 import 'dart:async';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -47,8 +48,18 @@ class SpeakerIdService {
   /// their vector length differs, but note that two models can share a vector
   /// length, so clear the People list when switching models.
   static const String modelFileName = 'wespeaker_en_voxceleb_resnet34.onnx';
+  // Pinned to one commit of the model repo (not `main`), and the downloaded
+  // file is checked against [modelSha256], so a changed or truncated file is
+  // rejected instead of being loaded by native code.
+  static const String modelCommit = '0743f301363dec56491a490f6d6cbc9d67f9a3bf';
   static const String modelUrl =
-      'https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/$modelFileName';
+      'https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/$modelCommit/$modelFileName';
+  static const String modelSha256 =
+      '5ef208a9da1453335308a6b6f4e6dfbd7e183a38b604de0a57664f45d257fe94';
+  static const int modelSizeBytes = 26534365;
+
+  /// How long a download may go without receiving anything before it fails.
+  static const Duration downloadTimeout = Duration(seconds: 30);
 
   // --- Tuning ------------------------------------------------------------
 
@@ -103,7 +114,7 @@ class SpeakerIdService {
   Future<void> _initialize() async {
     final path = await _modelPath();
     final file = File(path);
-    if (!file.existsSync() || file.lengthSync() < 1024 * 1024) {
+    if (!file.existsSync() || file.lengthSync() != modelSizeBytes) {
       await _download(file);
     }
     // dispose() may have run while the download was in progress; loading now
@@ -135,14 +146,18 @@ class SpeakerIdService {
     final partial = File('${target.path}.${DateTime.now().microsecondsSinceEpoch}.part');
     final client = http.Client();
     try {
-      final response = await client.send(http.Request('GET', Uri.parse(modelUrl)));
+      final response = await client
+          .send(http.Request('GET', Uri.parse(modelUrl)))
+          .timeout(downloadTimeout);
       if (response.statusCode != 200) {
         throw Exception('Speaker model download failed (HTTP ${response.statusCode})');
       }
       final sink = partial.openWrite();
-      await response.stream.pipe(sink);
-      if (partial.lengthSync() < 1024 * 1024) {
-        throw Exception('Speaker model download looks incomplete');
+      // A stalled connection fails the download (and a later call retries).
+      await response.stream.timeout(downloadTimeout).pipe(sink);
+      if (partial.lengthSync() != modelSizeBytes ||
+          await sha256OfFile(partial) != modelSha256) {
+        throw Exception('Speaker model download is incomplete or not the expected file');
       }
       await partial.rename(target.path);
     } catch (e) {
@@ -151,6 +166,13 @@ class SpeakerIdService {
     } finally {
       client.close();
     }
+  }
+
+  /// Lower-case hex SHA-256 of [file].
+  @visibleForTesting
+  static Future<String> sha256OfFile(File file) async {
+    final digest = await sha256.bind(file.openRead()).first;
+    return digest.toString();
   }
 
   // --- Audio in ----------------------------------------------------------

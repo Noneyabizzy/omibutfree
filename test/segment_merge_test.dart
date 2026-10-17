@@ -55,6 +55,20 @@ void main() {
       expect(live.length, 2);
     });
 
+    test('a small overlap with the previous block still merges', () {
+      final live = <TranscriptSegment>[];
+      appendSegmentsMerged(live, [seg('one', 0, 0.0, 3.0)]);
+      appendSegmentsMerged(live, [seg('two', 0, 2.5, 4.0)]);
+      expect(live.length, 1);
+    });
+
+    test('an overlap of more than a second does not merge', () {
+      final live = <TranscriptSegment>[];
+      appendSegmentsMerged(live, [seg('one', 0, 0.0, 5.0)]);
+      appendSegmentsMerged(live, [seg('two', 0, 2.0, 6.0)]);
+      expect(live.length, 2);
+    });
+
     test('keeps the speaker name, taking the newest one if it changed', () {
       final live = <TranscriptSegment>[];
       appendSegmentsMerged(live, [seg('a', 0, 0.0, 1.0)]);

@@ -38,6 +38,10 @@ class FakeDeepgram {
   }
 }
 
+/// The binary (audio) frames in [log], leaving out KeepAlive text frames.
+List<List<int>> audioFrames(List<dynamic> log) =>
+    log.whereType<List<int>>().toList();
+
 /// Polls until [test] is true or [timeout] passes.
 Future<bool> waitFor(bool Function() test,
     {Duration timeout = const Duration(seconds: 5)}) async {
@@ -66,12 +70,31 @@ void main() {
         onReconnected: onReconnected,
       );
 
+  test('connect() during a slow disconnect() keeps the new connection', () async {
+    final dg = make();
+    await dg.connect();
+    await waitFor(() => server.received.isNotEmpty);
+
+    // disconnect() awaits closing the old socket; connect() runs meanwhile.
+    final closing = dg.disconnect();
+    await dg.connect();
+    await closing;
+
+    expect(await waitFor(() => server.received.length >= 2), isTrue);
+    dg.sendAudio(frame());
+    expect(await waitFor(() => audioFrames(server.received[1]).isNotEmpty), isTrue,
+        reason: 'audio must reach the second connection');
+    await dg.disconnect();
+  });
+
   test('audio reaches the server', () async {
     final dg = make();
     await dg.connect();
     await waitFor(() => server.received.isNotEmpty);
     dg.sendAudio(frame());
-    expect(await waitFor(() => server.received.first.isNotEmpty), isTrue);
+    expect(
+        await waitFor(() => audioFrames(server.received.first).isNotEmpty),
+        isTrue);
     await dg.disconnect();
   });
 
@@ -91,7 +114,7 @@ void main() {
     expect(await waitFor(() => dg.isConnected), isTrue);
 
     dg.sendAudio(frame());
-    expect(await waitFor(() => server.received[1].isNotEmpty), isTrue,
+    expect(await waitFor(() => audioFrames(server.received[1]).isNotEmpty), isTrue,
         reason: 'audio must reach the new connection');
     await dg.disconnect();
   });
@@ -101,7 +124,8 @@ void main() {
     await dg.connect();
     await waitFor(() => server.connections.length == 1);
     await server.connections.first.close();
-    await waitFor(() => !dg.isConnected);
+    expect(await waitFor(() => !dg.isConnected), isTrue,
+        reason: 'the client should notice the closed connection');
     expect(() => dg.sendAudio(frame()), returnsNormally);
     await dg.disconnect();
   });

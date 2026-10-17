@@ -306,18 +306,27 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: const Text('Recognise speakers', style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(
                     SettingsService.useDeepgram
-                        ? 'Name people by their voice. Downloads a ~26 MB voice model the first time. Applies the next time listening starts.'
+                        ? 'Name people by their voice. Downloads a ~26 MB voice model the first time. Turning it on applies the next time listening starts; turning it off stops it now.'
                         : 'Only works with the Cloud (Deepgram) transcription engine.',
                     style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13)),
                   value: SettingsService.speakerIdEnabled,
-                  onChanged: (value) async {
-                    if (value) {
-                      final ok = await _confirmVoiceprints();
-                      if (ok != true) return;
-                    }
-                    if (!mounted) return;
-                    setState(() => SettingsService.speakerIdEnabled = value);
-                  },
+                  // Recognition needs Deepgram's speaker numbers, so it cannot be
+                  // switched on in another mode (it can still be switched off).
+                  onChanged: !SettingsService.useDeepgram &&
+                          !SettingsService.speakerIdEnabled
+                      ? null
+                      : (value) async {
+                          final provider =
+                              Provider.of<AppProvider>(context, listen: false);
+                          if (value) {
+                            final ok = await _confirmVoiceprints();
+                            if (ok != true) return;
+                          }
+                          if (!mounted) return;
+                          setState(() => SettingsService.speakerIdEnabled = value);
+                          // Switching off also stops a session that is running.
+                          if (!value) provider.stopSpeakerRecognition();
+                        },
                   activeThumbColor: const Color(0xFF6C5CE7),
                 ),
                 if (SettingsService.speakerIdEnabled) ...[
@@ -604,7 +613,10 @@ class _SettingsPageState extends State<SettingsPage> {
             '${DatabaseService.voiceClipRetentionDays} days unless you name '
             'that speaker. Samples of people you name are kept until you '
             'delete them under People & Voices, where you can also delete all '
-            'voice data. Device backups may include the database.\n\n'
+            'voice data. For each named person only the newest '
+            '${DatabaseService.maxEmbeddingsPerPerson} samples are kept; older '
+            'ones are replaced as new ones are added. Device backups may '
+            'include the database.\n\n'
             'Only record people who are fine with this; voiceprints count as '
             'biometric data in some places.',
           ),

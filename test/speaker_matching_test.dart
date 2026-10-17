@@ -235,5 +235,15 @@ void main() {
       s.forgetPerson('alice');
       expect(s.resolvedFor(0), isNull);
     });
+
+    test('forgetPerson also drops the samples of the speakers it named', () {
+      final s = session();
+      s.addEmbedding(0, voice(1, clipSeed: 50));
+      s.addEmbedding(1, voice(2, clipSeed: 60));
+      s.resolve(0);
+      s.forgetPerson('alice');
+      expect(s.snapshotEmbeddings().containsKey(0), isFalse);
+      expect(s.snapshotEmbeddings().containsKey(1), isTrue);
+    });
   });
 }

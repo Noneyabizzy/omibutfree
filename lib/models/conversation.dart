@@ -70,9 +70,12 @@ bool _sameVoice(TranscriptSegment a, TranscriptSegment b) =>
 ///
 /// Deepgram sends a new result after every pause, so one person talking with
 /// pauses would otherwise show up as a string of small blocks. A different
-/// speaker in between, or a long gap, still starts a new block. A timestamp
-/// that jumps backwards (a new Deepgram stream restarts its clock) never
-/// merges.
+/// speaker in between, or a long gap, still starts a new block. A segment may
+/// start up to one second before the previous one ended (Deepgram's word
+/// timings can overlap slightly) and still merge; a larger jump backwards
+/// never merges. A new Deepgram stream restarts its clock, so the app ends the
+/// current conversation when the stream reconnects instead of relying on this
+/// check.
 void appendSegmentsMerged(
   List<TranscriptSegment> target,
   List<TranscriptSegment> incoming, {

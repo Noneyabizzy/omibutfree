@@ -32,13 +32,14 @@ It connects directly to your Omi hardware (Friend/DevKit) via Bluetooth Low Ener
 - **Offline Capable**: Use local Whisper models to transcribe audio without an internet connection.
 - **Export All Data**: Export your entire database as JSON anytime.
 - **iCloud Backup**: Optional sync across your devices.
+- **Voiceprints (Speaker Recognition)**: while recognition is on, the app computes a voiceprint (a numeric summary of a voice) for each voice it hears and stores it in the app's local database on the device; no audio is kept by this feature. Voiceprints from a conversation are deleted after 14 days unless you name that speaker; samples of people you name are kept until you delete them (People & Voices > Delete person, or Delete all voice data), except that only the newest 40 samples are kept per named person, so older ones are replaced as new ones are added. Expiry of the 14-day samples runs when a conversation is saved and each time the app is brought to the foreground, as well as at start-up. The app itself does not upload voiceprints, but the database may be included in device backups, and the audio is still sent to Deepgram for transcription as before. Voiceprints count as biometric data in some places, so only record people who are OK with it.
 
 ### 🧠 Advanced AI
 
 - **Memories**: Automatically extracts important facts. Edit or add memories manually by selecting text.
 - **Actionable Tasks**: Detects promises and to-dos with scheduled local notifications.
 - **Hold-to-Ask**: Hold the Omi button to chat with your AI assistant in real-time.
-- **Speaker Recognition** (opt-in, Cloud/Deepgram mode): Tap a speaker in a saved conversation to name them; the app learns their voice on-device and recognises that person in later conversations, including while listening live. Manage people and delete voice data under Settings > People & Voices. Read the Privacy note under Credits at the bottom before turning it on.
+- **Speaker Recognition** (opt-in, Cloud/Deepgram mode): Tap a speaker in a saved conversation to name them; the app learns their voice on-device and recognises that person in later conversations, including while listening live. Turn it on before you start listening: it can only learn from voice samples captured while it is on, so a conversation recorded with it off cannot be used to name its speakers afterwards. Manage people and delete voice data under Settings > People & Voices. Read the [voiceprint privacy note](#-privacy--sovereignty) before turning it on.
 
 ### ⚡️ Modern Hardware Integration
 
@@ -120,8 +121,7 @@ This project is open source and free forever. We welcome contributions!
 ## 🙏 Credits & Third-Party Models
 
 - **Sherpa-ONNX** (Apache-2.0) runs the speaker-embedding model on-device.
-- **Voice model**: a WeSpeaker ResNet34 speaker-embedding model trained on VoxCeleb, in ONNX format, downloaded on first use (~26 MB) from the sherpa-onnx author's Hugging Face repo (`csukuangfj/speaker-embedding-models`). I could not find a clear licence statement for this exact file. WeSpeaker's [pretrained-model docs](https://github.com/wenet-e2e/wespeaker/blob/master/docs/pretrained.md) say its pretrained models follow the licence of their training dataset, and the [VoxCeleb dataset page](https://mm.kaist.ac.kr/datasets/voxceleb/) has that dataset's terms. Read both yourself before using or redistributing the model.
-- **Privacy**: while recognition is on, the app computes a voiceprint (a numeric summary of a voice) for each voice it hears and stores it in the app's local database on the device; no audio is kept by this feature. Voiceprints from a conversation are deleted after 14 days unless you name that speaker; samples of people you name are kept until you delete them (People & Voices > Delete person, or Delete all voice data). The app itself does not upload voiceprints, but the database may be included in device backups, and the audio is still sent to Deepgram for transcription as before. Voiceprints count as biometric data in some places, so only record people who are OK with it.
+- **Voice model**: a WeSpeaker ResNet34 speaker-embedding model trained on VoxCeleb, in ONNX format, downloaded on first use (~26 MB) from the sherpa-onnx author's Hugging Face repo (`csukuangfj/speaker-embedding-models`), pinned to one commit and checked against a SHA-256 before it is used. I could not find a clear licence statement for this exact file. WeSpeaker's [pretrained-model docs](https://github.com/wenet-e2e/wespeaker/blob/master/docs/pretrained.md) say its pretrained models follow the licence of their training dataset, and the [VoxCeleb dataset page](https://mm.kaist.ac.kr/datasets/voxceleb/) has that dataset's terms. Read both yourself before using or redistributing the model.
 
 ---
 

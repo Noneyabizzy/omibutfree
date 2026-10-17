@@ -636,6 +636,8 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
         speakerEmbeddings,
       );
     }
+    // Expire old voice clips while the app keeps running, not only at start.
+    await DatabaseService.purgeOldConversationSpeakers();
     await loadConversations();
 
     debugPrint('Saved conversation: ${conversationToSave.title}');
@@ -755,6 +757,14 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     _speakerId?.updateThreshold(value);
   }
 
+  /// Stops recognition in the running session (the setting was turned off):
+  /// no more voice samples are computed or kept, and queued work is dropped.
+  void stopSpeakerRecognition() {
+    _speakerId?.dispose();
+    _speakerId = null;
+    _speakerStreamGen++;
+  }
+
   /// Start speaker recognition for a new Deepgram stream.
   void _startSpeakerId() {
     _speakerId?.dispose();
@@ -785,6 +795,14 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   /// "speaker N" numbering start over, so restart the speaker timeline too.
   void _onDeepgramReconnected() {
     debugPrint('Deepgram reconnected - restarting the speaker timeline');
+    // The new stream numbers its speakers from 0 again, so "speaker 0" before
+    // and after can be different people. End the current conversation here so
+    // no saved conversation mixes the two numberings (the audio during the
+    // drop was lost anyway). This also keeps the voice samples gathered so
+    // far, which are read before the reset below.
+    if (_currentConversation != null && _liveSegments.isNotEmpty) {
+      unawaited(_saveCurrentConversation());
+    }
     _speakerStreamGen++;
     _speakerId?.resetStream();
   }
@@ -1747,6 +1765,8 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
 
     if (state == AppLifecycleState.resumed) {
       NotificationService().resetGlobalBadge();
+      // The app can stay alive for days, so check retention on every resume.
+      unawaited(DatabaseService.purgeOldConversationSpeakers());
     }
   }
 

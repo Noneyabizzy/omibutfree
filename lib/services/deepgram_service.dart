@@ -275,10 +275,14 @@ class DeepgramService {
     _reconnectTimer = null;
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
-    await _subscription?.cancel();
+    // Take the old connection out of the fields before awaiting anything: a
+    // connect() that runs while we wait must not have its new socket cleared.
+    final subscription = _subscription;
+    final channel = _channel;
     _subscription = null;
-    await _channel?.sink.close();
     _channel = null;
+    await subscription?.cancel();
+    await channel?.sink.close();
     debugPrint('Disconnected from Deepgram');
   }
 }

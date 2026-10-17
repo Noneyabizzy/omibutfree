@@ -286,9 +286,17 @@ class SpeakerSession {
     _resolved.clear();
   }
 
-  /// Drop everything tied to a person (e.g. they were deleted).
+  /// Drop everything tied to a person (e.g. they were deleted): the name, and
+  /// the voice samples collected for the speakers that were resolved to them.
   void forgetPerson(String personId) {
-    _resolved.removeWhere((_, p) => p.id == personId);
+    final speakers = [
+      for (final e in _resolved.entries)
+        if (e.value.id == personId) e.key,
+    ];
+    for (final k in speakers) {
+      _resolved.remove(k);
+      _embeddings.remove(k);
+    }
   }
 
   /// After people were enrolled/renamed, point resolutions at fresh profiles.

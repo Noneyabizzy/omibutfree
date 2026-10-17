@@ -108,8 +108,9 @@ class PeoplePage extends StatelessWidget {
         content: const Text(
           'Every saved voice sample is deleted: those learned for the people '
           'listed here and those kept for naming speakers in past '
-          'conversations. People keep their names but will no longer be '
-          'recognised until you name them again.',
+          'conversations. People keep their names but will not be recognised '
+          'again until you name them in new conversations, because the '
+          'samples from past conversations are gone.',
         ),
         actions: [
           TextButton(
