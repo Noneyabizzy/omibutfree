@@ -139,11 +139,39 @@ class SpeakerIdService {
     debugPrint('Speaker model loaded (embedding dim: ${_extractor!.dim})');
   }
 
+  /// File names of partial downloads running in this process right now.
+  static final Set<String> _activePartials = {};
+
+  /// Deletes `<model file>.<n>.part` files left behind when an earlier run of
+  /// the app was stopped mid-download (the normal cleanup only runs when a
+  /// download fails inside the app). Names in [keep], the downloads still
+  /// running, are left alone.
+  @visibleForTesting
+  static void deleteStalePartials(File target, {Set<String> keep = const {}}) {
+    final dir = target.parent;
+    if (!dir.existsSync()) return;
+    final prefix = '${target.uri.pathSegments.last}.';
+    for (final entity in dir.listSync()) {
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last;
+      if (name.startsWith(prefix) &&
+          name.endsWith('.part') &&
+          !keep.contains(name)) {
+        try {
+          entity.deleteSync();
+        } catch (_) {}
+      }
+    }
+  }
+
   Future<void> _download(File target) async {
     debugPrint('Downloading speaker model from $modelUrl');
     await target.parent.create(recursive: true);
+    deleteStalePartials(target, keep: _activePartials);
     // Unique per download, so overlapping downloads cannot write to one file.
     final partial = File('${target.path}.${DateTime.now().microsecondsSinceEpoch}.part');
+    final partialName = partial.uri.pathSegments.last;
+    _activePartials.add(partialName);
     final client = http.Client();
     IOSink? sink;
     try {
@@ -170,6 +198,7 @@ class SpeakerIdService {
       if (partial.existsSync()) partial.deleteSync();
       rethrow;
     } finally {
+      _activePartials.remove(partialName);
       client.close();
     }
   }

@@ -733,6 +733,11 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
 
   Future<void> _idChain = Future.value();
 
+  /// Completes when the enrolled voices have been loaded into the current
+  /// speaker service. Identification waits for it, so the first segments of a
+  /// conversation are not matched against an empty list of people.
+  Future<void> _profilesLoaded = Future.value();
+
   /// Bumped each time a conversation ends, so identification work queued for
   /// the old conversation cannot add its clips to the next one.
   int _conversationGen = 0;
@@ -804,7 +809,13 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
     _speakerId = service;
     _speakerModelFailed = false;
     service.resetStream();
-    unawaited(_refreshSpeakerProfiles());
+    // A new service starts a new queue, so work still running for the previous
+    // service (for example a model download that has not finished) cannot hold
+    // it up. That old work drops itself through the stale() checks.
+    _idChain = Future.value();
+    _profilesLoaded = _refreshSpeakerProfiles().catchError((Object e) {
+      debugPrint('Could not load speaker profiles: $e');
+    });
 
     // Download/load the model in the background so transcription starts at once.
     service.initialize().then((_) {
@@ -918,6 +929,8 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
       }
       if (stale() || !svc.isReady) return;
     }
+    await _profilesLoaded;
+    if (stale()) return;
 
     final touched = <int>{};
     for (final seg in segments) {
@@ -1019,6 +1032,12 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
       }
     }
 
+    // Is this speaker already labeled as the chosen person?
+    final speakerSegments =
+        conversation.segments.where((s) => s.speakerId == speakerId);
+    final alreadyThisPerson =
+        speakerSegments.isNotEmpty && speakerSegments.every((s) => s.personId == id);
+
     // Undo what this speaker previously taught (possibly the wrong person),
     // then enroll their voice samples under the chosen person. One queued
     // step, so a "Delete all voice data" cannot run between reading the
@@ -1027,11 +1046,16 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
       // The person may have been deleted since the sheet was opened.
       final people = await DatabaseService.getPeople();
       if (!people.any((p) => p.id == id)) return null;
-      await DatabaseService.removeEnrollmentsFor(conversation.id, speakerId);
       final found = await DatabaseService.getConversationSpeakerEmbeddings(
         conversation.id,
         speakerId,
       );
+      // Re-picking the same person after the stored samples were purged: there
+      // is nothing to learn again, and removing what this speaker already
+      // taught that person would only lose it.
+      if (found.isNotEmpty || !alreadyThisPerson) {
+        await DatabaseService.removeEnrollmentsFor(conversation.id, speakerId);
+      }
       if (found.isNotEmpty) {
         await DatabaseService.addPersonEmbeddings(
           id,

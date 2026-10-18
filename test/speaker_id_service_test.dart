@@ -45,6 +45,50 @@ void main() {
     });
   });
 
+  group('SpeakerIdService.deleteStalePartials', () {
+    test('removes leftover partial downloads of the model, nothing else', () {
+      final dir = Directory.systemTemp.createTempSync('partials_test');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final target = File('${dir.path}/${SpeakerIdService.modelFileName}');
+      File('${target.path}.111.part').writeAsStringSync('x');
+      File('${target.path}.222.part').writeAsStringSync('x');
+      target.writeAsStringSync('the model');
+      final other = File('${dir.path}/other.onnx.333.part')..writeAsStringSync('x');
+      final notPartial = File('${target.path}.444.tmp')..writeAsStringSync('x');
+
+      SpeakerIdService.deleteStalePartials(target);
+
+      expect(File('${target.path}.111.part').existsSync(), isFalse);
+      expect(File('${target.path}.222.part').existsSync(), isFalse);
+      expect(target.existsSync(), isTrue);
+      expect(other.existsSync(), isTrue);
+      expect(notPartial.existsSync(), isTrue);
+    });
+
+    test('keeps the partial file of a download that is still running', () {
+      final dir = Directory.systemTemp.createTempSync('partials_keep_test');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final target = File('${dir.path}/${SpeakerIdService.modelFileName}');
+      final running = File('${target.path}.555.part')..writeAsStringSync('x');
+      final stale = File('${target.path}.666.part')..writeAsStringSync('x');
+
+      SpeakerIdService.deleteStalePartials(
+        target,
+        keep: {'${SpeakerIdService.modelFileName}.555.part'},
+      );
+
+      expect(running.existsSync(), isTrue);
+      expect(stale.existsSync(), isFalse);
+    });
+
+    test('does nothing when the model folder does not exist yet', () {
+      final dir = Directory.systemTemp.createTempSync('partials_none_test');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final target = File('${dir.path}/missing/${SpeakerIdService.modelFileName}');
+      expect(() => SpeakerIdService.deleteStalePartials(target), returnsNormally);
+    });
+  });
+
   group('SpeakerIdService.dispose', () {
     test('initialize after dispose fails instead of downloading again', () async {
       final svc = SpeakerIdService()..dispose();

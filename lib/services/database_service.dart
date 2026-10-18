@@ -200,12 +200,17 @@ class DatabaseService {
 
   static Future<void> deleteConversation(String id) async {
     final db = await database;
-    await db.delete('conversations', where: 'id = ?', whereArgs: [id]);
-    await db.delete(
-      'conversation_speakers',
-      where: 'conversation_id = ?',
-      whereArgs: [id],
-    );
+    // One transaction: if the app stopped between the two deletes, the voice
+    // samples would be left without a conversation and the retention cleanup
+    // (which looks them up through their conversation) would never remove them.
+    await db.transaction((txn) async {
+      await txn.delete('conversations', where: 'id = ?', whereArgs: [id]);
+      await txn.delete(
+        'conversation_speakers',
+        where: 'conversation_id = ?',
+        whereArgs: [id],
+      );
+    });
   }
 
   static Future<String> getAllConversationsContext({int limit = 10}) async {
