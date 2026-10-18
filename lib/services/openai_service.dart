@@ -16,9 +16,10 @@ class OpenAIService {
   /// Output-length limit for a request. GPT-6 models reject `max_tokens` and
   /// require `max_completion_tokens` (confirmed with a direct API call to
   /// gpt-6-luna). They also count reasoning tokens against the limit, so they
-  /// get 3x headroom. Other models keep the request they always received.
+  /// get 6x headroom; it is only a ceiling and costs nothing unless used.
+  /// Other models keep the request they always received.
   Map<String, int> _tokenLimit(int limit) => model.startsWith('gpt-6')
-      ? {'max_completion_tokens': limit * 3}
+      ? {'max_completion_tokens': limit * 6}
       : {'max_tokens': limit};
 
   /// Chat with OpenAI using conversation context
