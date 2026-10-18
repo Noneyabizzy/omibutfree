@@ -273,7 +273,7 @@ class DeepgramService {
 
     void flush() {
       if (run.isEmpty) return;
-      // `punctuated_word` carries punctuation/capitalisation; fall back to the
+      // `punctuated_word` carries punctuation/capitalization; fall back to the
       // bare word if a response does not include it.
       final text = run
           .map((w) => (w['punctuated_word'] ?? w['word'] ?? '').toString())
