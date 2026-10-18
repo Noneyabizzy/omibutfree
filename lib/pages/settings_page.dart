@@ -303,7 +303,7 @@ class _SettingsPageState extends State<SettingsPage> {
             child: Column(
               children: [
                 SwitchListTile(
-                  title: const Text('Recognise speakers', style: TextStyle(fontWeight: FontWeight.w600)),
+                  title: const Text('Recognize speakers', style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(
                     SettingsService.useDeepgram
                         ? 'Name people by their voice. Downloads a ~26 MB voice model the first time. Turning it on applies the next time listening starts; turning it off stops it now.'
@@ -357,7 +357,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     child: Text(
-                      'Higher = fewer wrong names but more speakers left unnamed. Lower it a little if people you have labelled are not being recognised; raise it if strangers get named.',
+                      'Higher = fewer wrong names but more speakers left unnamed. Lower it a little if people you have labeled are not being recognized; raise it if strangers get named.',
                       style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13)),
                   ),
                 ],
@@ -601,7 +601,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Recognise speakers by voice?'),
+        title: const Text('Recognize speakers by voice?'),
         content: const SingleChildScrollView(
           child: Text(
             'While listening, the app computes a voiceprint (a numeric summary '

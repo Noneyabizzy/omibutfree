@@ -204,15 +204,15 @@ class _ConversationDetailPageState extends State<ConversationDetailPage> {
       SnackBar(
         content: Text(
           learned > 0
-              ? 'Labelled as $name - learned from $learned voice sample${learned == 1 ? '' : 's'}'
+              ? 'Labeled as $name - learned from $learned voice sample${learned == 1 ? '' : 's'}'
               : SettingsService.speakerIdEnabled
-                  ? 'Labelled as $name. No voice sample is stored for this '
+                  ? 'Labeled as $name. No voice sample is stored for this '
                       'speaker (too little speech, recognition was off, or the '
                       'samples were deleted after '
                       '${DatabaseService.voiceClipRetentionDays} days), so '
                       'the app could not learn their voice from it.'
-                  : 'Labelled as $name. To let the app learn voices from '
-                      'future conversations, turn on "Recognise speakers" in '
+                  : 'Labeled as $name. To let the app learn voices from '
+                      'future conversations, turn on "Recognize speakers" in '
                       'Settings.',
         ),
         duration: const Duration(seconds: 5),

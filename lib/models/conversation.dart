@@ -15,10 +15,10 @@ class TranscriptSegment {
   final bool isUser;
 
   /// Name of the identified/assigned person, or null if this speaker has not
-  /// been recognised or labelled yet.
+  /// been recognized or labeled yet.
   String? speakerName;
 
-  /// Id of the matching row in the `people` table (null if unlabelled).
+  /// Id of the matching row in the `people` table (null if unlabeled).
   String? personId;
 
   TranscriptSegment({
@@ -31,7 +31,7 @@ class TranscriptSegment {
     this.personId,
   });
 
-  /// The full label for text: the summariser and dialogs. Compact chips and
+  /// The full label for text: the summarizer and dialogs. Compact chips and
   /// avatars show `S1`, `S2`, ... for an unnamed speaker instead.
   String get displayName => speakerName ?? 'Speaker $speakerId';
 
@@ -59,7 +59,7 @@ class TranscriptSegment {
 }
 
 /// True if two segments are from the same voice: the same Deepgram speaker
-/// number, or both recognised as the same person. (Deepgram's live diarization
+/// number, or both recognized as the same person. (Deepgram's live diarization
 /// can flip one voice between two numbers, but recognition still names both
 /// as the same person.)
 bool _sameVoice(TranscriptSegment a, TranscriptSegment b) =>
@@ -72,8 +72,8 @@ bool _sameVoice(TranscriptSegment a, TranscriptSegment b) =>
 /// Deepgram sends a new result after every pause, so one person talking with
 /// pauses would otherwise show up as a string of small blocks. A different
 /// speaker in between, or a long gap, still starts a new block. When two
-/// Deepgram speaker numbers are merged because both were recognised as the same
-/// person, the block keeps the earlier segment's speaker number only. (Labelling
+/// Deepgram speaker numbers are merged because both were recognized as the same
+/// person, the block keeps the earlier segment's speaker number only. (Labeling
 /// that block later uses that number's voice samples; the other number's
 /// samples are not linked to it.) A segment may
 /// start up to one second before the previous one ended (Deepgram's word
@@ -127,7 +127,7 @@ void applyPersonNames(
 
 /// Re-applies [appendSegmentsMerged] to [segments] in place, so [segments] must
 /// be a growable list (not `const []`). Used after speaker recognition names
-/// segments that arrived unnamed, which can make neighbouring blocks belong to
+/// segments that arrived unnamed, which can make neighboring blocks belong to
 /// the same person.
 void mergeAdjacentSegments(
   List<TranscriptSegment> segments, {

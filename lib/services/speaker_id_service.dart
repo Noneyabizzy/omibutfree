@@ -8,7 +8,7 @@
 //  3. A small speaker-embedding model turns each clip into a vector that
 //     captures the voice. Clips from the same person land close together.
 //  4. Vectors are compared (cosine similarity) with the voices of people the
-//     user has labelled before; a close match gives the speaker a name.
+//     user has labeled before; a close match gives the speaker a name.
 //  5. When the user labels a speaker, their clips are saved for that person,
 //     so recognition improves the more you label.
 //
@@ -37,9 +37,9 @@ class SpeakerIdService {
 
   /// English speaker-embedding model (WeSpeaker ResNet34, trained on VoxCeleb).
   ///
-  /// Licence note: the file is hosted by the sherpa-onnx author on Hugging Face
+  /// License note: the file is hosted by the sherpa-onnx author on Hugging Face
   /// (no model card there). WeSpeaker's docs state that its pretrained models
-  /// follow the licence of their training dataset; VoxCeleb is published under
+  /// follow the license of their training dataset; VoxCeleb is published under
   /// CC BY 4.0 'for research purposes'. Read those terms yourself before using
   /// or redistributing the model. See README 'Credits'.
   ///

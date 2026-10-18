@@ -54,7 +54,7 @@ void main() {
       expect(back.text, 'hello');
     });
 
-    test('unlabelled segments leave the keys out and read back as null', () {
+    test('unlabeled segments leave the keys out and read back as null', () {
       final seg = TranscriptSegment(
         text: 'hi',
         speakerId: 1,

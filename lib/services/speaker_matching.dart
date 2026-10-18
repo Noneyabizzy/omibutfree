@@ -44,7 +44,7 @@ double cosineSimilarity(Float32List a, Float32List b) {
   return _dot(a, b) / (na * nb);
 }
 
-/// Mean of the (normalised) embeddings, re-normalised. All inputs must have
+/// Mean of the (normalized) embeddings, re-normalized. All inputs must have
 /// the same length.
 Float32List centroidOf(List<Float32List> embeddings) {
   assert(embeddings.isNotEmpty);

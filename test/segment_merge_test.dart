@@ -91,7 +91,7 @@ void main() {
     });
 
     test('one voice flipping between two Deepgram speaker numbers merges when '
-        'both are recognised as the same person', () {
+        'both are recognized as the same person', () {
       final live = <TranscriptSegment>[];
       appendSegmentsMerged(
           live, [seg('I think', 0, 0.0, 1.0, name: 'Louis', personId: 'p1')]);

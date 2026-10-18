@@ -181,7 +181,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
       await loadConversations();
       await loadMemories();
       await loadTasks();
-      // Drop old voice clips kept for labelling (see DatabaseService).
+      // Drop old voice clips kept for labeling (see DatabaseService).
       await DatabaseService.purgeOldConversationSpeakers();
       await loadPeople();
     } catch (e) {
@@ -485,7 +485,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
       }
     }
 
-    // Give already-recognised speakers their name straight away
+    // Give already-recognized speakers their name straight away
     _applyKnownSpeakers(segments);
 
     // Add segments to current conversation
@@ -721,8 +721,8 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   //
   // Deepgram labels speakers "0, 1, 2 ...". While listening we cut each
   // segment's audio out of a rolling buffer, turn it into a voice embedding
-  // with Sherpa-ONNX and compare it with the people the user has labelled
-  // before. Labelling a speaker in a saved conversation teaches the app that
+  // with Sherpa-ONNX and compare it with the people the user has labeled
+  // before. Labeling a speaker in a saved conversation teaches the app that
   // person's voice (see assignSpeaker).
 
   List<Person> _people = [];
@@ -771,7 +771,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   /// write them afterwards.
   int _voiceDataEpoch = 0;
 
-  /// Voice-sample changes (saving a conversation's samples, labelling a
+  /// Voice-sample changes (saving a conversation's samples, labeling a
   /// speaker, delete-all) run one after another, so they cannot interleave.
   final SerialQueue _voiceWrites = SerialQueue();
 
@@ -961,7 +961,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
       changed = _applyResolution(id) || changed;
     }
     if (changed) {
-      // Naming can reveal that neighbouring blocks are the same person.
+      // Naming can reveal that neighboring blocks are the same person.
       if (_mergesSegments) mergeAdjacentSegments(_liveSegments);
       notifyListeners();
     }
@@ -984,7 +984,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
 
   /// Label one speaker of a saved conversation as [personId] (existing) or as
   /// a new person called [newPersonName]. The voice samples captured for that
-  /// speaker are enrolled for the person, so they are recognised next time.
+  /// speaker are enrolled for the person, so they are recognized next time.
   ///
   /// Returns how many voice samples were learned (0 if none were captured, e.g.
   /// speaker recognition was off or the speaker only said short phrases).
@@ -1098,7 +1098,7 @@ class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   /// Deletes every stored voice sample: those learned for named people (the
-  /// people keep their names) and those kept for labelling saved conversations.
+  /// people keep their names) and those kept for labeling saved conversations.
   Future<void> deleteAllVoiceData() async {
     _voiceDataEpoch++;
     // Identification work already queued was started on audio from before the

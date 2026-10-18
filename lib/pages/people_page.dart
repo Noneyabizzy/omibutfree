@@ -1,4 +1,4 @@
-// Manage the people whose voices the app can recognise.
+// Manage the people whose voices the app can recognize.
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
@@ -39,7 +39,7 @@ class PeoplePage extends StatelessWidget {
                 child: Text(
                   'No one yet.\n\nOpen a conversation and tap a speaker to name '
                   'them. The app learns each person\'s voice from the clips '
-                  'you label and recognises them in future conversations.',
+                  'you label and recognizes them in future conversations.',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -108,7 +108,7 @@ class PeoplePage extends StatelessWidget {
         content: const Text(
           'Every saved voice sample is deleted: those learned for the people '
           'listed here and those kept for naming speakers in past '
-          'conversations. People keep their names but will not be recognised '
+          'conversations. People keep their names but will not be recognized '
           'again until you name them in new conversations, because the '
           'samples from past conversations are gone.',
         ),
@@ -134,7 +134,7 @@ class PeoplePage extends StatelessWidget {
         content: const Text(
           'Their saved voice samples are deleted, including those kept for '
           'speakers named as them in past conversations, so they will no '
-          'longer be recognised. Names already shown in past transcripts stay '
+          'longer be recognized. Names already shown in past transcripts stay '
           'as text. Samples of speakers you never named are kept until they '
           'expire; "Delete all voice data" removes those too.',
         ),

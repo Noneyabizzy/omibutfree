@@ -85,7 +85,7 @@ class SettingsService {
   static set speakerIdEnabled(bool value) => prefs.setBool('speaker_id_enabled', value);
 
   /// Cosine-similarity cut-off for naming a voice. Higher = stricter (fewer
-  /// wrong names, more "Speaker N" left unlabelled). 0.6 sits in the middle of
+  /// wrong names, more "Speaker N" left unlabeled). 0.6 sits in the middle of
   /// the range that gave no false matches on test audio (0.55-0.65); real-world
   /// audio from the Omi mic may need tuning.
   static double get speakerMatchThreshold => prefs.getDouble('speaker_match_threshold') ?? 0.6;

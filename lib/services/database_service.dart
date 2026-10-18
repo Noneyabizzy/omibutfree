@@ -171,7 +171,7 @@ class DatabaseService {
     return conversations;
   }
 
-  /// Transcript segments store the name a person had when they were labelled.
+  /// Transcript segments store the name a person had when they were labeled.
   /// Look the current name up by person id, so a rename shows everywhere
   /// (including exports) without rewriting every conversation.
   static Future<void> _applyPersonNames(
@@ -294,8 +294,8 @@ ${c.transcript}
   }
 
   /// Deletes the person and all of their voice samples, including the samples
-  /// kept for labelling the speakers named as them in past conversations.
-  /// Transcript segments that were labelled with their name keep the text
+  /// kept for labeling the speakers named as them in past conversations.
+  /// Transcript segments that were labeled with their name keep the text
   /// label. (Samples of a speaker that was never named stay until they expire.)
   static Future<void> deletePerson(String id) async {
     final db = await database;
@@ -328,11 +328,11 @@ ${c.transcript}
     });
   }
 
-  /// How long the voice samples kept for labelling a conversation's speakers
+  /// How long the voice samples kept for labeling a conversation's speakers
   /// are retained. Samples copied to a named person are kept until deleted.
   static const int voiceClipRetentionDays = 14;
 
-  /// Deletes the labelling samples of conversations older than [days]. Returns
+  /// Deletes the labeling samples of conversations older than [days]. Returns
   /// how many rows were removed.
   static Future<int> purgeOldConversationSpeakers({
     int days = voiceClipRetentionDays,
@@ -360,7 +360,7 @@ ${c.transcript}
   }
 
   /// Remove voice samples previously learned from this conversation speaker
-  /// (used before re-labelling so a wrong label does not keep polluting the
+  /// (used before re-labeling so a wrong label does not keep polluting the
   /// wrong person's profile).
   static Future<void> removeEnrollmentsFor(
     String conversationId,
@@ -408,7 +408,7 @@ ${c.transcript}
   }
 
   /// Persist the voice samples gathered for each diarized speaker of a
-  /// conversation so they can be labelled later.
+  /// conversation so they can be labeled later.
   static Future<void> saveConversationSpeakers(
     String conversationId,
     Map<int, List<Float32List>> embeddingsBySpeaker,
@@ -584,7 +584,7 @@ ${c.transcript}
       'conversations': conversations.map((c) => c.toJson()).toList(),
       'memories': memories.map((m) => m.toJson()).toList(),
       'tasks': tasks.map((t) => t.toJson()).toList(),
-      // Names of labelled people, so `person_id` in the transcripts resolves.
+      // Names of labeled people, so `person_id` in the transcripts resolves.
       // Voice samples (voiceprints) are deliberately not exported.
       'people': [
         for (final p in people)
